@@ -92,6 +92,7 @@ function mockProfile(npi: string): ProfileData | null {
       uniquePatients: pv.uniquePatients,
       avgAllowedAmt: pv.avgAllowedAmt,
       avgPaymentAmt: Math.round(pv.avgAllowedAmt * 0.78),
+      avgSubmittedCharge: Math.round(pv.avgAllowedAmt * 1.4),
       placeOfService: (pv.facilityType === 'Hospital' ? 'Facility' : pv.facilityType === 'Office' ? 'Office' : 'Mixed') as 'Facility' | 'Office' | 'Mixed',
     })),
     isLive: false,

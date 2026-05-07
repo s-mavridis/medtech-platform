@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Search, Building2, Map, GitBranch,
-  Target, Activity, TrendingUp, Users, Settings
+  Target, Activity, TrendingUp, Users, Settings, Stethoscope
 } from 'lucide-react';
 
 interface NavItem { id: string; label: string; icon: React.ElementType; }
@@ -8,6 +8,7 @@ interface NavItem { id: string; label: string; icon: React.ElementType; }
 const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'search', label: 'Provider Search', icon: Search },
+  { id: 'cpt', label: 'CPT Explorer', icon: Stethoscope },
   { id: 'facilities', label: 'Facilities', icon: Building2 },
   { id: 'territory', label: 'Territory Analytics', icon: Map },
   { id: 'referrals', label: 'Referral Network', icon: GitBranch },
@@ -55,7 +56,7 @@ export default function Sidebar({ activeView, setActiveView }: SidebarProps) {
         <div className="space-y-1 text-xs text-gray-500">
           <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-green-400" />NPPES NPI Registry</div>
           <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-green-400" />CMS Open Payments 2022</div>
-          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-400" />Medicare PUF 2022</div>
+          <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-green-400" />Medicare PUF 2022–2023</div>
         </div>
       </div>
 

@@ -4,6 +4,7 @@ import Header from './components/layout/Header';
 import Dashboard from './components/dashboard/Dashboard';
 import ProviderSearch from './components/providers/ProviderSearch';
 import ProviderProfile from './components/providers/ProviderProfile';
+import CptExplorer from './components/cpt/CptExplorer';
 import FacilitiesView from './components/facilities/FacilityProfile';
 import TerritoryAnalytics from './components/territory/TerritoryAnalytics';
 import ReferralNetwork from './components/referrals/ReferralNetwork';
@@ -39,6 +40,8 @@ export default function App() {
         return selectedNpi
           ? <ProviderProfile npi={selectedNpi} setActiveView={navigateTo} previousView={previousView} />
           : <ProviderSearch setActiveView={navigateTo} setSelectedNpi={setSelectedNpi} />;
+      case 'cpt':
+        return <CptExplorer setActiveView={navigateTo} setSelectedNpi={setSelectedNpi} />;
       case 'facilities':
         return <FacilitiesView setActiveView={navigateTo} />;
       case 'territory':
