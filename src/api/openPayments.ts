@@ -2,7 +2,7 @@
 // Dataset: 2022 General Payments
 // UUID confirmed: df01c2f8-dc1f-4e79-96cb-8208beaf143c
 
-const BASE = 'https://openpaymentsdata.cms.gov/api/1/datastore/query';
+const BASE = '/api/open-payments';
 const DATASET_2022_GENERAL = 'df01c2f8-dc1f-4e79-96cb-8208beaf143c';
 const DATASET_2021_GENERAL = '9592313e-7bce-4c9b-b986-b3cd3e1bf969';
 

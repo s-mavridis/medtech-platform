@@ -1,0 +1,31 @@
+# Proxy CMS public APIs server-side to avoid CORS restrictions
+
+[[redirects]]
+  from = "/api/nppes"
+  to = "https://npiregistry.cms.hhs.gov/api/"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/open-payments/*"
+  to = "https://openpaymentsdata.cms.gov/api/1/datastore/query/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/cms-provider/*"
+  to = "https://data.cms.gov/provider-data/api/1/datastore/query/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/cms-data/*"
+  to = "https://data.cms.gov/data-api/v1/dataset/:splat"
+  status = 200
+  force = true
+
+# SPA fallback — required for client-side routing
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

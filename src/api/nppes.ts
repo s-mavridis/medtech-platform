@@ -1,7 +1,7 @@
 // NPPES NPI Registry — public API, no auth required
 // https://npiregistry.cms.hhs.gov/api-page
 
-const BASE = 'https://npiregistry.cms.hhs.gov/api';
+const BASE = '/api/nppes';
 
 export interface NppesAddress {
   address_purpose: 'LOCATION' | 'MAILING';

@@ -3,7 +3,7 @@
 // https://data.cms.gov/provider-summary-by-type-of-service/medicare-physician-other-practitioners
 
 const PUF_DATASET_ID = 'fc9b245a-0a61-4536-bde5-6cc37d09d5f4';
-const BASE = 'https://data.cms.gov/data-api/v1/dataset';
+const BASE = '/api/cms-data';
 
 export interface PhysicianPufRecord {
   Rndrng_NPI: string;
@@ -91,7 +91,7 @@ export async function getProcedureVolumesByNpi(npi: string): Promise<ProcedureVo
 // CMS Provider Data — Physicians & Clinicians national file
 // https://data.cms.gov/provider-data/dataset/mj5m-pzi6
 const PHYSICIAN_COMPARE_ID = 'mj5m-pzi6';
-const PROVIDER_DATA_BASE = 'https://data.cms.gov/provider-data/api/1/datastore/query';
+const PROVIDER_DATA_BASE = '/api/cms-provider';
 
 export interface PhysicianCompareRecord {
   NPI: string;
