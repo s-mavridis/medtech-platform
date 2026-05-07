@@ -1,67 +1,40 @@
-import { useState, useRef, useEffect } from 'react';
-import { GitBranch, Info, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
-import { providers, referralEdges } from '../../data/providers';
-import type { Provider } from '../../types';
+import { useState, useCallback } from 'react';
+import { Search, Loader2, AlertCircle, Info, Users, MapPin, ChevronRight, X } from 'lucide-react';
+import { searchNppes, lookupNpi, getPracticeAddress, getPrimaryTaxonomy, mapSpecialty, getDisplayName } from '../../api/nppes';
+import type { NppesResult } from '../../api/nppes';
 
-interface NodePos { x: number; y: number; }
-
-const nodePositions: Record<string, NodePos> = {
-  '1234567890': { x: 420, y: 200 },
-  '2345678901': { x: 580, y: 100 },
-  '3456789012': { x: 660, y: 280 },
-  '4567890123': { x: 500, y: 340 },
-  '5678901234': { x: 140, y: 160 },
-  '6789012345': { x: 720, y: 180 },
-  '7890123456': { x: 180, y: 320 },
-  '8901234567': { x: 110, y: 260 },
-};
-
-const specialtyColors: Record<string, string> = {
+const SPECIALTY_COLORS: Record<string, string> = {
   'Orthopedic Surgery': '#3b82f6',
-  'Internal Medicine': '#10b981',
-  'Family Medicine': '#10b981',
-  'Rheumatology': '#8b5cf6',
+  'Internal Medicine':  '#8b5cf6',
+  'Family Medicine':    '#10b981',
+  'Cardiology':         '#f59e0b',
+  'General Surgery':    '#ef4444',
+  'Neurology':          '#06b6d4',
+  'Rheumatology':       '#ec4899',
+  'Gastroenterology':   '#84cc16',
+  'Physical Medicine & Rehabilitation': '#f97316',
 };
 
-function getColor(specialty: string) {
-  return specialtyColors[specialty] || '#6b7280';
+function nodeColor(specialty: string): string {
+  return SPECIALTY_COLORS[specialty] ?? '#6b7280';
 }
 
-function Arrow({ x1, y1, x2, y2, weight, active }: { x1: number; y1: number; x2: number; y2: number; weight: number; active: boolean }) {
-  const opacity = active ? 0.9 : 0.3;
-  const strokeWidth = Math.max(1, Math.min(5, weight / 60));
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  const ux = dx / len;
-  const uy = dy / len;
-  const r = 26;
-  const ax = x1 + ux * r;
-  const ay = y1 + uy * r;
-  const bx = x2 - ux * r;
-  const by = y2 - uy * r;
+// Radial layout: center node + surrounding nodes
+function radialPositions(count: number, cx: number, cy: number, r: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    x: cx + r * Math.cos((2 * Math.PI * i) / count - Math.PI / 2),
+    y: cy + r * Math.sin((2 * Math.PI * i) / count - Math.PI / 2),
+  }));
+}
 
-  const curve = 30;
-  const mx = (ax + bx) / 2 - uy * curve;
-  const my = (ay + by) / 2 + ux * curve;
-
-  return (
-    <g opacity={opacity}>
-      <defs>
-        <marker id={`arr-${x1}-${y1}`} markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-          <path d="M0,0 L0,6 L6,3 z" fill={active ? '#3b82f6' : '#94a3b8'} />
-        </marker>
-      </defs>
-      <path
-        d={`M${ax},${ay} Q${mx},${my} ${bx},${by}`}
-        stroke={active ? '#3b82f6' : '#cbd5e1'}
-        strokeWidth={strokeWidth}
-        fill="none"
-        markerEnd={`url(#arr-${x1}-${y1})`}
-      />
-      <text x={mx} y={my - 6} textAnchor="middle" fontSize={9} fill="#64748b">{weight}</text>
-    </g>
-  );
+interface NetworkNode {
+  npi: string;
+  name: string;
+  specialty: string;
+  city: string;
+  state: string;
+  zip: string;
+  isCenter: boolean;
 }
 
 interface ReferralNetworkProps {
@@ -70,220 +43,274 @@ interface ReferralNetworkProps {
 }
 
 export default function ReferralNetwork({ setActiveView, setSelectedNpi }: ReferralNetworkProps) {
-  const [selectedNpi, setSelected] = useState<string | null>(null);
-  const [hoveredNpi, setHovered] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<NppesResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [center, setCenter] = useState<NetworkNode | null>(null);
+  const [peers, setPeers] = useState<NetworkNode[]>([]);
+  const [loadingPeers, setLoadingPeers] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
 
-  const selected = selectedNpi ? providers.find(p => p.npi === selectedNpi) : null;
+  const handleSearch = useCallback(async (q: string) => {
+    if (!q.trim()) { setSearchResults([]); return; }
+    setSearching(true);
+    try {
+      const parts = q.trim().split(/\s+/);
+      const data = await searchNppes({
+        first_name: parts.length > 1 ? parts[0] : undefined,
+        last_name: parts.length > 1 ? parts[parts.length - 1] : parts[0],
+        enumeration_type: 'NPI-1',
+        limit: 10,
+      });
+      setSearchResults(data.results ?? []);
+    } catch { setSearchResults([]); }
+    finally { setSearching(false); }
+  }, []);
 
-  const activeEdges = selectedNpi
-    ? referralEdges.filter(e => e.sourceNpi === selectedNpi || e.targetNpi === selectedNpi)
-    : referralEdges;
+  const selectProvider = useCallback(async (result: NppesResult) => {
+    setSearchResults([]);
+    setError(null);
+    setLoadingPeers(true);
 
-  const connectedNpis = new Set<string>();
-  if (selectedNpi) {
-    activeEdges.forEach(e => { connectedNpis.add(e.sourceNpi); connectedNpis.add(e.targetNpi); });
-  }
+    const addr = getPracticeAddress(result);
+    const tax = getPrimaryTaxonomy(result);
+    const specialty = mapSpecialty(tax?.code ?? '', tax?.desc ?? '');
 
-  const handleNodeClick = (npi: string) => {
-    setSelected(npi === selectedNpi ? null : npi);
-  };
+    setCenter({
+      npi: result.number,
+      name: getDisplayName(result),
+      specialty,
+      city: addr?.city ?? '',
+      state: addr?.state ?? '',
+      zip: addr?.postal_code?.slice(0, 5) ?? '',
+      isCenter: true,
+    });
+    setPeers([]);
 
-  const handleViewProfile = (npi: string) => {
-    setSelectedNpi(npi);
-    setActiveView('profile');
-  };
+    try {
+      // Find co-practitioners: same specialty in same ZIP code
+      const zip = addr?.postal_code?.slice(0, 5);
+      const data = await searchNppes({
+        taxonomy_description: tax?.desc ?? specialty,
+        postal_code: zip || undefined,
+        state: addr?.state || undefined,
+        enumeration_type: 'NPI-1',
+        limit: 20,
+      });
+
+      const colleagues = (data.results ?? [])
+        .filter(r => r.number !== result.number)
+        .slice(0, 12)
+        .map(r => {
+          const a = getPracticeAddress(r);
+          const t = getPrimaryTaxonomy(r);
+          return {
+            npi: r.number,
+            name: getDisplayName(r),
+            specialty: mapSpecialty(t?.code ?? '', t?.desc ?? ''),
+            city: a?.city ?? '',
+            state: a?.state ?? '',
+            zip: a?.postal_code?.slice(0, 5) ?? '',
+            isCenter: false,
+          };
+        });
+
+      setPeers(colleagues);
+      if (colleagues.length === 0) setError(`No co-practitioners found in ZIP ${zip} for ${specialty}. The network shows providers sharing the same specialty and practice area.`);
+    } catch (e) {
+      setError((e as Error).message ?? 'Failed to load network');
+    } finally {
+      setLoadingPeers(false);
+    }
+  }, []);
+
+  const allNodes = center ? [center, ...peers] : [];
+  const cx = 340, cy = 240, radius = 170;
+  const positions = center
+    ? [{ x: cx, y: cy }, ...radialPositions(peers.length, cx, cy, radius)]
+    : [];
 
   return (
-    <div className="flex h-full fade-in">
-      {/* Graph */}
-      <div className="flex-1 relative bg-gray-50">
-        <div className="absolute top-4 left-4 z-10 flex gap-2">
-          <button className="btn-secondary text-xs p-2"><ZoomIn className="w-3.5 h-3.5" /></button>
-          <button className="btn-secondary text-xs p-2"><ZoomOut className="w-3.5 h-3.5" /></button>
-          <button className="btn-secondary text-xs p-2" onClick={() => setSelected(null)}><RotateCcw className="w-3.5 h-3.5" /></button>
-        </div>
-
-        {/* Legend */}
-        <div className="absolute bottom-4 left-4 z-10 card p-3 text-xs space-y-1.5">
-          <div className="font-semibold text-gray-700 mb-1">Legend</div>
-          {Object.entries(specialtyColors).filter(([k]) => k !== 'Rheumatology' || true).slice(0,3).map(([spec, color]) => (
-            <div key={spec} className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-              <span className="text-gray-600">{spec}</span>
-            </div>
-          ))}
-          <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-purple-500" />
-            <span className="text-gray-600">Rheumatology</span>
-          </div>
-          <div className="pt-1 border-t border-gray-100 text-gray-500">Arrow thickness = volume</div>
-        </div>
-
-        <svg width="100%" height="100%" viewBox="0 0 860 480" preserveAspectRatio="xMidYMid meet">
-          {/* Edges */}
-          {referralEdges.map((edge, i) => {
-            const src = nodePositions[edge.sourceNpi];
-            const dst = nodePositions[edge.targetNpi];
-            if (!src || !dst) return null;
-            const isActive = !selectedNpi || activeEdges.includes(edge);
-            return (
-              <Arrow key={i} x1={src.x} y1={src.y} x2={dst.x} y2={dst.y}
-                weight={edge.patientCount} active={isActive} />
-            );
-          })}
-
-          {/* Nodes */}
-          {providers.map(provider => {
-            const pos = nodePositions[provider.npi];
-            if (!pos) return null;
-            const isSelected = provider.npi === selectedNpi;
-            const isConnected = connectedNpis.has(provider.npi);
-            const dimmed = selectedNpi && !isSelected && !isConnected;
-            const color = getColor(provider.specialty);
-            const isOrtho = provider.specialty === 'Orthopedic Surgery';
-            const r = isOrtho ? 28 : 22;
-
-            return (
-              <g key={provider.npi} opacity={dimmed ? 0.25 : 1}
-                onClick={() => handleNodeClick(provider.npi)}
-                onMouseEnter={() => setHovered(provider.npi)}
-                onMouseLeave={() => setHovered(null)}
-                style={{ cursor: 'pointer' }}
-              >
-                {isSelected && (
-                  <circle cx={pos.x} cy={pos.y} r={r + 8} fill={color} opacity={0.15} />
-                )}
-                <circle cx={pos.x} cy={pos.y} r={r}
-                  fill={color} stroke={isSelected ? '#1d4ed8' : 'white'}
-                  strokeWidth={isSelected ? 3 : 2}
-                />
-                <text x={pos.x} y={pos.y + 4} textAnchor="middle" fontSize={10} fontWeight="600" fill="white">
-                  {provider.lastName.substring(0, 6)}
-                </text>
-                <text x={pos.x} y={pos.y + r + 14} textAnchor="middle" fontSize={9} fill="#374151">
-                  {provider.address.city}
-                </text>
-                {provider.opportunityScore >= 88 && (
-                  <circle cx={pos.x + r - 4} cy={pos.y - r + 4} r={6} fill="#ef4444" stroke="white" strokeWidth={1.5} />
-                )}
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-
-      {/* Detail panel */}
-      <div className="w-72 border-l border-gray-200 bg-white flex flex-col overflow-y-auto">
-        {selected ? (
-          <div className="p-4 space-y-4 fade-in">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="font-semibold text-gray-900">{selected.name}</div>
-                <div className="text-sm text-gray-500">{selected.specialty}</div>
-              </div>
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm text-white ${
-                selected.opportunityScore >= 90 ? 'bg-red-500' : 'bg-amber-500'
-              }`}>
-                {selected.opportunityScore}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="label">Referrals In / Year</div>
-              <div className="text-2xl font-bold text-blue-600">{selected.referralSummary.totalReferralsIn}</div>
-              <div className="label mt-2">Referrals Out / Year</div>
-              <div className="text-2xl font-bold text-purple-600">{selected.referralSummary.totalReferralsOut}</div>
-            </div>
-
-            {selected.referralSummary.topReferralSources.length > 0 && (
-              <div>
-                <div className="label mb-2">Top Feeder Sources</div>
-                {selected.referralSummary.topReferralSources.map(s => (
-                  <div key={s} className="flex items-center gap-2 py-1 text-sm">
-                    <span className="w-2 h-2 rounded-full bg-blue-400" />
-                    {s}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div>
-              <div className="label mb-2">Sends Patients To</div>
-              {selected.referralSummary.topReferralDestinations.map(d => (
-                <div key={d} className="flex items-center gap-2 py-1 text-sm">
-                  <span className="w-2 h-2 rounded-full bg-purple-400" />
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-2 border-t border-gray-100 space-y-2">
-              <button onClick={() => handleViewProfile(selected.npi)} className="btn-primary w-full justify-center text-xs">
-                View Full Profile
+    <div className="flex flex-col h-full fade-in">
+      {/* Header */}
+      <div className="p-4 border-b border-gray-100 bg-white space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              className="input pl-9 pr-9"
+              placeholder="Search a provider to build their practice network…"
+              value={query}
+              onChange={e => { setQuery(e.target.value); handleSearch(e.target.value); }}
+            />
+            {query && (
+              <button onClick={() => { setQuery(''); setSearchResults([]); }} className="absolute right-3 top-1/2 -translate-y-1/2">
+                <X className="w-4 h-4 text-gray-400 hover:text-gray-600" />
               </button>
-              <button className="btn-secondary w-full justify-center text-xs">Add to CRM</button>
-            </div>
-
-            {/* Connected edges */}
-            <div>
-              <div className="label mb-2">Patient Flow Connections</div>
-              {activeEdges.map((edge, i) => {
-                const other = edge.sourceNpi === selected.npi ? edge.targetNpi : edge.sourceNpi;
-                const otherProv = providers.find(p => p.npi === other);
-                if (!otherProv) return null;
-                const isIncoming = edge.targetNpi === selected.npi;
-                return (
-                  <div key={i} className="flex items-center gap-2 py-1.5 text-xs border-b border-gray-50">
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${isIncoming ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                      {isIncoming ? '← In' : '→ Out'}
-                    </span>
-                    <span className="text-gray-700 flex-1">{otherProv.lastName}</span>
-                    <span className="font-semibold text-gray-900">{edge.patientCount} pts</span>
-                  </div>
-                );
-              })}
-            </div>
+            )}
           </div>
-        ) : (
-          <div className="p-4 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <GitBranch className="w-4 h-4" /> Patient Referral Network
-            </div>
-            <div className="text-xs text-gray-500 bg-blue-50 rounded-lg p-3">
-              <Info className="w-3.5 h-3.5 inline mr-1.5 text-blue-500" />
-              Click any provider node to explore their referral relationships. Arrow thickness indicates patient volume.
-            </div>
+          {searching && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+        </div>
 
-            <div>
-              <div className="label mb-2">Top Feeder Physicians</div>
-              {providers.filter(p => p.specialty !== 'Orthopedic Surgery').map(p => (
-                <div key={p.npi}
-                  className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
-                  onClick={() => setSelected(p.npi)}
-                >
-                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: getColor(p.specialty) }} />
-                  <span className="text-sm text-gray-700 flex-1">{p.name}</span>
-                  <span className="text-xs text-gray-500">{p.referralSummary.totalReferralsOut} out</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="border-t border-gray-100 pt-3">
-              <div className="label mb-2">Target Surgeons</div>
-              {providers.filter(p => p.specialty === 'Orthopedic Surgery').map(p => (
-                <div key={p.npi}
-                  className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
-                  onClick={() => setSelected(p.npi)}
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 flex-shrink-0" />
-                  <span className="text-sm text-gray-700 flex-1">{p.lastName}</span>
-                  <span className="text-xs font-bold text-gray-900">{p.opportunityScore}</span>
-                </div>
-              ))}
-            </div>
+        {/* Search dropdown */}
+        {searchResults.length > 0 && (
+          <div className="absolute z-10 mt-1 w-96 bg-white border border-gray-200 rounded-xl shadow-lg max-h-64 overflow-auto">
+            {searchResults.map(r => {
+              const addr = getPracticeAddress(r);
+              const tax = getPrimaryTaxonomy(r);
+              return (
+                <button key={r.number} onClick={() => { setQuery(getDisplayName(r)); selectProvider(r); }}
+                  className="w-full px-4 py-3 text-left hover:bg-blue-50 border-b border-gray-50 last:border-0">
+                  <div className="font-medium text-sm text-gray-900">{getDisplayName(r)}</div>
+                  <div className="text-xs text-gray-500">{mapSpecialty(tax?.code ?? '', tax?.desc ?? '')} · {addr?.city}, {addr?.state}</div>
+                  <div className="text-xs text-gray-400 font-mono">NPI {r.number}</div>
+                </button>
+              );
+            })}
           </div>
         )}
+
+        <div className="flex items-center gap-1.5 text-xs text-gray-400">
+          <Info className="w-3.5 h-3.5" />
+          Shows providers sharing the same specialty and practice area (ZIP) from NPPES — a proxy for co-practitioner networks. True referral patterns require CMS shared-patient data.
+        </div>
       </div>
+
+      {error && (
+        <div className="mx-4 mt-3 flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-sm">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!center && !loadingPeers && (
+        <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-gray-400">
+          <Users className="w-12 h-12 mb-4 opacity-20" />
+          <div className="text-lg font-medium text-gray-500 mb-1">Practice Network Explorer</div>
+          <div className="text-sm max-w-sm">Search for a provider to see their co-practitioners — physicians sharing the same specialty and practice ZIP code, sourced live from NPPES.</div>
+        </div>
+      )}
+
+      {loadingPeers && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-400">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+          <p className="text-sm">Building practice network from NPPES…</p>
+        </div>
+      )}
+
+      {/* Network graph + sidebar */}
+      {center && !loadingPeers && (
+        <div className="flex-1 flex overflow-hidden">
+          {/* SVG graph */}
+          <div className="flex-1 overflow-hidden relative">
+            <svg width="100%" height="100%" viewBox="0 0 680 480" className="w-full h-full">
+              {/* Edges */}
+              {positions.slice(1).map((pos, i) => (
+                <line key={i} x1={cx} y1={cy} x2={pos.x} y2={pos.y}
+                  stroke={highlighted === peers[i]?.npi ? '#3b82f6' : '#e5e7eb'}
+                  strokeWidth={highlighted === peers[i]?.npi ? 2 : 1.5}
+                  strokeDasharray={highlighted === peers[i]?.npi ? undefined : '4 3'}
+                />
+              ))}
+
+              {/* Peer nodes */}
+              {peers.map((node, i) => {
+                const pos = positions[i + 1];
+                if (!pos) return null;
+                const isHL = highlighted === node.npi;
+                const color = nodeColor(node.specialty);
+                return (
+                  <g key={node.npi} className="cursor-pointer"
+                    onClick={() => setHighlighted(isHL ? null : node.npi)}
+                    onDoubleClick={() => { setSelectedNpi(node.npi); setActiveView('profile'); }}>
+                    <circle cx={pos.x} cy={pos.y} r={isHL ? 26 : 22} fill={color} opacity={isHL ? 1 : 0.75}
+                      stroke={isHL ? '#1d4ed8' : 'white'} strokeWidth={isHL ? 2.5 : 1.5} />
+                    <text x={pos.x} y={pos.y + 1} textAnchor="middle" dominantBaseline="middle"
+                      fill="white" fontSize={9} fontWeight="600">
+                      {node.name.split(',')[0].split(' ').map((w: string) => w[0]).join('').slice(0, 3)}
+                    </text>
+                    <text x={pos.x} y={pos.y + (isHL ? 33 : 29)} textAnchor="middle"
+                      fill="#374151" fontSize={8.5} fontWeight={isHL ? '600' : '400'}>
+                      {node.name.split(',')[0].split(' ').slice(-1)[0]}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Center node */}
+              {center && (
+                <g onDoubleClick={() => { setSelectedNpi(center.npi); setActiveView('profile'); }} className="cursor-pointer">
+                  <circle cx={cx} cy={cy} r={36} fill={nodeColor(center.specialty)} stroke="#1d4ed8" strokeWidth={3} />
+                  <text x={cx} y={cy - 4} textAnchor="middle" fill="white" fontSize={10} fontWeight="700">
+                    {center.name.split(',')[0].split(' ').map((w: string) => w[0]).join('').slice(0, 3)}
+                  </text>
+                  <text x={cx} y={cy + 9} textAnchor="middle" fill="white" fontSize={8}>CENTER</text>
+                  <text x={cx} y={cy + 46} textAnchor="middle" fill="#374151" fontSize={9} fontWeight="600">
+                    {center.name.split(',')[0].split(' ').slice(-1)[0]}
+                  </text>
+                </g>
+              )}
+
+              {/* Legend */}
+              <text x={12} y={468} fill="#9ca3af" fontSize={9}>Click node to highlight · Double-click to view profile</text>
+            </svg>
+          </div>
+
+          {/* Sidebar */}
+          <div className="w-72 border-l border-gray-100 overflow-auto bg-white flex flex-col">
+            {/* Center provider */}
+            <div className="p-4 border-b border-gray-100">
+              <div className="text-xs font-semibold text-gray-400 uppercase mb-2">Center Provider</div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                  style={{ background: nodeColor(center.specialty) }}>
+                  {center.name.split(',')[0].split(' ').map((w: string) => w[0]).join('').slice(0, 2)}
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-gray-900">{center.name}</div>
+                  <div className="text-xs text-gray-500">{center.specialty}</div>
+                  <div className="text-xs text-gray-400 flex items-center gap-0.5"><MapPin className="w-3 h-3" />{center.city}, {center.state} {center.zip}</div>
+                </div>
+              </div>
+              <button onClick={() => { setSelectedNpi(center.npi); setActiveView('profile'); }}
+                className="mt-2 w-full text-xs text-blue-600 hover:text-blue-800 text-left">View full profile →</button>
+            </div>
+
+            {/* Network stats */}
+            <div className="px-4 py-2 border-b border-gray-100 flex items-center justify-between text-xs text-gray-500">
+              <span>{peers.length} co-practitioners found</span>
+              <span className="text-gray-400">same ZIP · same specialty</span>
+            </div>
+
+            {/* Peer list */}
+            <div className="flex-1 overflow-auto divide-y divide-gray-50">
+              {allNodes.slice(1).map(node => (
+                <div key={node.npi}
+                  className={`px-4 py-3 cursor-pointer transition-colors ${highlighted === node.npi ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                  onClick={() => setHighlighted(highlighted === node.npi ? null : node.npi)}>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                      style={{ background: nodeColor(node.specialty) }}>
+                      {node.name.split(',')[0].split(' ').map((w: string) => w[0]).join('').slice(0, 2)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">{node.name}</div>
+                      <div className="text-xs text-gray-400 flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />{node.city}, {node.state}
+                      </div>
+                    </div>
+                    <button onClick={e => { e.stopPropagation(); setSelectedNpi(node.npi); setActiveView('profile'); }}
+                      className="text-gray-300 hover:text-blue-500">
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

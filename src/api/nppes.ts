@@ -62,15 +62,15 @@ export interface NppesResponse {
 }
 
 export interface NppesSearchParams {
-  number?: string;           // exact NPI
-  name?: string;             // org name (NPI-2)
+  number?: string;
+  organization_name?: string;  // NPI-2 org search
   first_name?: string;
   last_name?: string;
-  taxonomy_description?: string; // specialty name (partial match ok)
+  taxonomy_description?: string;
   city?: string;
-  state?: string;            // 2-letter abbreviation
+  state?: string;
   postal_code?: string;
-  enumeration_type?: 'NPI-1' | 'NPI-2'; // 1=individual, 2=org
+  enumeration_type?: 'NPI-1' | 'NPI-2';
   limit?: number;
   skip?: number;
 }
@@ -78,6 +78,7 @@ export interface NppesSearchParams {
 export async function searchNppes(params: NppesSearchParams): Promise<NppesResponse> {
   const p: Record<string, string> = { version: '2.1' };
   if (params.number) p['number'] = params.number;
+  if (params.organization_name) p['organization_name'] = params.organization_name;
   if (params.first_name) p['first_name'] = params.first_name;
   if (params.last_name) p['last_name'] = params.last_name;
   if (params.taxonomy_description) p['taxonomy_description'] = params.taxonomy_description;

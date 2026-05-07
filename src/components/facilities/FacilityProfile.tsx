@@ -1,180 +1,199 @@
-import { Building2, MapPin, Star, Users, TrendingUp, ChevronRight, ArrowLeft } from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { Search, Building2, MapPin, Phone, ChevronRight, Loader2, AlertCircle, X, Info, ArrowLeft } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { facilities } from '../../data/providers';
+import { searchNppes, getPracticeAddress, getPrimaryTaxonomy, mapSpecialty, getDisplayName } from '../../api/nppes';
+import { getInstitutionCptProfile } from '../../api/cms';
+import type { NppesResult } from '../../api/nppes';
+import type { CptProviderRow } from '../../api/cms';
 
-interface FacilityCardProps {
-  facilityId: string;
-  onSelect: (id: string) => void;
-}
+const US_STATES = ['','AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'];
+const fmt$ = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const fmtN = (n: number) => n.toLocaleString();
 
-function FacilityCard({ facility, onSelect }: { facility: typeof facilities[0]; onSelect: () => void }) {
-  const totalProcs = facility.procedureVolumes.reduce((s, p) => s + p.totalClaims, 0);
+function OrgCard({ org, onSelect }: { org: NppesResult; onSelect: () => void }) {
+  const addr = getPracticeAddress(org);
+  const tax = getPrimaryTaxonomy(org);
   return (
-    <div
-      className="card p-4 cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group"
-      onClick={onSelect}
-    >
-      <div className="flex gap-4">
-        <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
-          facility.type === 'Hospital' ? 'bg-blue-100' : facility.type === 'ASC' ? 'bg-green-100' : 'bg-purple-100'
-        }`}>
-          <Building2 className={`w-6 h-6 ${
-            facility.type === 'Hospital' ? 'text-blue-600' : facility.type === 'ASC' ? 'text-green-600' : 'text-purple-600'
-          }`} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">{facility.name}</div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className={`badge text-xs ${facility.type === 'Hospital' ? 'badge-blue' : facility.type === 'ASC' ? 'badge-green' : 'badge-purple'}`}>
-                  {facility.type}
-                </span>
-                {facility.cmsRating && (
-                  <div className="flex items-center gap-0.5 text-xs text-amber-500">
-                    {Array.from({ length: facility.cmsRating }).map((_, i) => <Star key={i} className="w-3 h-3 fill-current" />)}
-                  </div>
-                )}
-                {facility.idn && <span className="text-xs text-gray-500">{facility.idn}</span>}
-              </div>
-            </div>
-            <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500 transition-colors flex-shrink-0" />
+    <div onClick={onSelect} className="card cursor-pointer hover:border-blue-200 hover:shadow-md transition-all group">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
+            <Building2 className="w-5 h-5 text-blue-600" />
           </div>
-          <div className="mt-2 flex items-center gap-1 text-sm text-gray-500">
-            <MapPin className="w-3.5 h-3.5" />
-            {facility.address.city}, {facility.address.state} · {facility.address.zip}
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-3">
-            <div>
-              <div className="text-xs text-gray-400">Affiliated Providers</div>
-              <div className="font-semibold text-gray-900">{facility.affiliatedProviders}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-400">Annual Procedures</div>
-              <div className="font-semibold text-gray-900">{totalProcs.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-400">Commercial Mix</div>
-              <div className="font-semibold text-gray-900">{facility.payerMix.commercial}%</div>
-            </div>
+          <div>
+            <div className="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">{getDisplayName(org)}</div>
+            <div className="text-xs text-gray-500 mt-0.5">{tax ? mapSpecialty(tax.code, tax.desc) : 'Health System / Organization'}</div>
           </div>
         </div>
+        <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500 mt-1 flex-shrink-0" />
       </div>
+      {addr && (
+        <div className="mt-2 flex items-center gap-1 text-xs text-gray-500">
+          <MapPin className="w-3.5 h-3.5 flex-shrink-0" />{addr.address_1}, {addr.city}, {addr.state} {addr.postal_code?.slice(0, 5)}
+        </div>
+      )}
+      <div className="mt-1 text-xs text-gray-400 font-mono">NPI {org.number}</div>
     </div>
   );
 }
 
-function FacilityDetailView({ facility, onBack }: { facility: typeof facilities[0]; onBack: () => void }) {
+function FacilityDetail({ org, onBack, setActiveView, setSelectedNpi }: {
+  org: NppesResult; onBack: () => void;
+  setActiveView: (v: string) => void; setSelectedNpi: (npi: string) => void;
+}) {
+  const [cptData, setCptData] = useState<CptProviderRow[] | null>(null);
+  const [cptLoading, setCptLoading] = useState(true);
+  const [cptError, setCptError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'cpt' | 'providers'>('cpt');
+  const addr = getPracticeAddress(org);
+  const name = getDisplayName(org);
+
+  const didLoad = useRef(false);
+  if (!didLoad.current) {
+    didLoad.current = true;
+    getInstitutionCptProfile(name, { limit: 500 })
+      .then(rows => setCptData(rows))
+      .catch(e => setCptError((e as Error).message))
+      .finally(() => setCptLoading(false));
+  }
+
+  const cptSummary = (() => {
+    if (!cptData) return [];
+    const map = new Map<string, { hcpcs: string; desc: string; services: number; patients: number; revenue: number }>();
+    for (const r of cptData) {
+      const e = map.get(r.hcpcs);
+      if (e) { e.services += r.totalServices; e.patients += r.uniquePatients; e.revenue += r.totalServices * r.avgAllowedAmt; }
+      else { map.set(r.hcpcs, { hcpcs: r.hcpcs, desc: r.description, services: r.totalServices, patients: r.uniquePatients, revenue: r.totalServices * r.avgAllowedAmt }); }
+    }
+    return Array.from(map.values()).sort((a, b) => b.services - a.services);
+  })();
+
+  const totalServices = cptSummary.reduce((s, r) => s + r.services, 0);
+  const totalRevenue = cptSummary.reduce((s, r) => s + r.revenue, 0);
+  const providerCount = new Set(cptData?.map(r => r.npi) ?? []).size;
+
   return (
-    <div className="fade-in">
-      <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-3">
-        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900">
-          <ArrowLeft className="w-4 h-4" /> Back to Facilities
+    <div className="flex flex-col h-full fade-in">
+      <div className="p-4 border-b border-gray-100 bg-white">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-3">
+          <ArrowLeft className="w-4 h-4" /> Back to search
         </button>
-        <span className="text-gray-300">/</span>
-        <span className="text-sm font-medium text-gray-900">{facility.name}</span>
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0">
+            <Building2 className="w-6 h-6 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-xl font-bold text-gray-900">{name}</h2>
+            {addr && <div className="flex items-center gap-1 text-sm text-gray-500 mt-1"><MapPin className="w-3.5 h-3.5" />{addr.address_1}, {addr.city}, {addr.state} {addr.postal_code?.slice(0, 5)}</div>}
+            {addr?.telephone_number && <div className="flex items-center gap-1 text-sm text-gray-500 mt-0.5"><Phone className="w-3.5 h-3.5" />{addr.telephone_number}</div>}
+            <div className="text-xs text-gray-400 font-mono mt-1">NPI {org.number}</div>
+          </div>
+        </div>
+        {cptData && cptData.length > 0 && (
+          <div className="grid grid-cols-3 gap-3 mt-4">
+            <div className="bg-blue-50 rounded-lg p-3 text-center"><div className="text-xl font-bold text-blue-900">{fmtN(providerCount)}</div><div className="text-xs text-blue-600">Billing providers</div></div>
+            <div className="bg-purple-50 rounded-lg p-3 text-center"><div className="text-xl font-bold text-purple-900">{fmtN(totalServices)}</div><div className="text-xs text-purple-600">Total services (2023)</div></div>
+            <div className="bg-green-50 rounded-lg p-3 text-center"><div className="text-xl font-bold text-green-900">{fmt$(totalRevenue)}</div><div className="text-xs text-green-600">Est. Medicare revenue</div></div>
+          </div>
+        )}
       </div>
 
-      <div className="p-6 space-y-6">
-        <div className="card p-6">
-          <div className="flex gap-5">
-            <div className={`w-16 h-16 rounded-xl flex items-center justify-center ${facility.type === 'Hospital' ? 'bg-blue-100' : 'bg-green-100'}`}>
-              <Building2 className={`w-8 h-8 ${facility.type === 'Hospital' ? 'text-blue-600' : 'text-green-600'}`} />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-xl font-bold text-gray-900">{facility.name}</h2>
-              <div className="flex items-center gap-3 mt-1">
-                <span className="badge-blue">{facility.type}</span>
-                {facility.cmsRating && (
-                  <div className="flex items-center gap-0.5 text-amber-400">
-                    {Array.from({ length: facility.cmsRating }).map((_, i) => <Star key={i} className="w-4 h-4 fill-current" />)}
-                    <span className="text-sm text-gray-600 ml-1">CMS Rating</span>
-                  </div>
-                )}
-                {facility.idn && <span className="badge bg-indigo-100 text-indigo-700">{facility.idn}</span>}
-              </div>
-              <div className="flex items-center gap-1 text-sm text-gray-500 mt-2">
-                <MapPin className="w-4 h-4" /> {facility.address.street}, {facility.address.city}, {facility.address.state}
-              </div>
-            </div>
-          </div>
+      <div className="border-b border-gray-200 bg-white px-4">
+        <nav className="flex gap-1">
+          {(['cpt', 'providers'] as const).map(id => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {id === 'cpt' ? 'CPT Revenue Mix' : 'Providers'}
+            </button>
+          ))}
+        </nav>
+      </div>
 
-          <div className="mt-5 grid grid-cols-4 gap-4 pt-5 border-t border-gray-100">
-            {facility.beds && (
-              <div className="text-center">
-                <div className="text-2xl font-bold text-gray-900">{facility.beds}</div>
-                <div className="text-xs text-gray-500">Licensed Beds</div>
-              </div>
-            )}
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-900">{facility.affiliatedProviders}</div>
-              <div className="text-xs text-gray-500">Affiliated Providers</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-900">{facility.payerMix.commercial}%</div>
-              <div className="text-xs text-gray-500">Commercial Mix</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-900">{facility.specialties.length}</div>
-              <div className="text-xs text-gray-500">Specialties</div>
-            </div>
+      <div className="flex-1 overflow-auto p-4 space-y-4">
+        {cptLoading && <div className="flex items-center justify-center gap-2 text-sm text-gray-500 py-12"><Loader2 className="w-4 h-4 animate-spin text-blue-500" />Loading Medicare procedure data…</div>}
+        {cptError && <div className="flex items-center gap-2 p-3 bg-red-50 text-red-700 rounded-lg text-sm"><AlertCircle className="w-4 h-4 flex-shrink-0" />{cptError}</div>}
+        {!cptLoading && cptData?.length === 0 && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700 flex gap-2">
+            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>No Medicare billing data found for <strong>{name}</strong>. CMS stores org names as submitted in billing records — try all-caps (e.g. "MAYO CLINIC") to match how providers report it to Medicare.</span>
           </div>
-        </div>
+        )}
 
-        <div className="grid grid-cols-2 gap-6">
-          <div className="card p-5">
-            <div className="section-title mb-4">Procedure Volume Trend</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={facility.monthlyVolumes}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }} />
-                <Bar dataKey="procedures" fill="#3b82f6" radius={[2, 2, 0, 0]} name="Procedures" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="card p-5">
-            <div className="section-title mb-4">Top Procedures</div>
-            <div className="space-y-3">
-              {facility.procedureVolumes.map((pv, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <span className="font-mono text-xs text-blue-600 w-14 flex-shrink-0">{pv.hcpcs}</span>
-                  <div className="flex-1">
-                    <div className="text-xs text-gray-700 mb-1 truncate">{pv.description}</div>
-                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-400 rounded-full" style={{ width: `${Math.min(100, (pv.totalClaims / 1500) * 100)}%` }} />
-                    </div>
-                  </div>
-                  <span className="text-sm font-semibold text-gray-900 w-16 text-right">{pv.totalClaims.toLocaleString()}</span>
-                </div>
-              ))}
+        {tab === 'cpt' && cptSummary.length > 0 && (
+          <>
+            <div className="card">
+              <div className="font-semibold text-gray-800 mb-3">Top Procedures by Volume · Medicare 2023</div>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={cptSummary.slice(0, 12).map(r => ({ name: r.hcpcs, services: r.services, desc: r.desc }))} margin={{ left: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={n => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n)} />
+                  <Tooltip formatter={(v: number) => [fmtN(v) + ' services']} labelFormatter={(_l: string, p: any[]) => p[0]?.payload?.desc ?? _l} />
+                  <Bar dataKey="services" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
-          </div>
-        </div>
+            <div className="card overflow-hidden p-0">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">HCPCS</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Procedure</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Services</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Patients</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Est. Revenue</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 bg-white">
+                  {cptSummary.slice(0, 30).map((r, i) => (
+                    <tr key={r.hcpcs + i} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5 font-mono text-xs font-semibold text-blue-700">{r.hcpcs}</td>
+                      <td className="px-4 py-2.5 text-gray-700 max-w-xs truncate">{r.desc}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmtN(r.services)}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-600">{fmtN(r.patients)}</td>
+                      <td className="px-4 py-2.5 text-right font-medium text-green-700">{fmt$(r.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
 
-        <div className="card p-5">
-          <div className="section-title mb-3">Payer Mix</div>
-          <div className="grid grid-cols-4 gap-4">
-            {[
-              { label: 'Commercial', value: facility.payerMix.commercial, color: 'bg-blue-500' },
-              { label: 'Medicare', value: facility.payerMix.medicare, color: 'bg-purple-500' },
-              { label: 'Medicaid', value: facility.payerMix.medicaid, color: 'bg-cyan-500' },
-              { label: 'Self-Pay', value: facility.payerMix.selfPay, color: 'bg-gray-400' },
-            ].map(p => (
-              <div key={p.label}>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-gray-500">{p.label}</span>
-                  <span className="font-semibold text-gray-900">{p.value}%</span>
-                </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div className={`h-full ${p.color} rounded-full`} style={{ width: `${p.value}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        {tab === 'providers' && cptData && cptData.length > 0 && (() => {
+          const provMap = new Map<string, { npi: string; name: string; specialty: string; city: string; state: string; services: number }>();
+          for (const r of cptData) {
+            if (provMap.has(r.npi)) { provMap.get(r.npi)!.services += r.totalServices; }
+            else { provMap.set(r.npi, { npi: r.npi, name: r.displayName, specialty: r.specialty, city: r.city, state: r.state, services: r.totalServices }); }
+          }
+          const providers = Array.from(provMap.values()).sort((a, b) => b.services - a.services);
+          return (
+            <div className="card overflow-hidden p-0">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Provider</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Specialty</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Location</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Services</th>
+                    <th className="w-8" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 bg-white">
+                  {providers.slice(0, 50).map(p => (
+                    <tr key={p.npi} className="hover:bg-blue-50/40 cursor-pointer group" onClick={() => { setSelectedNpi(p.npi); setActiveView('profile'); }}>
+                      <td className="px-4 py-2.5"><div className="font-medium text-gray-900 group-hover:text-blue-700">{p.name}</div><div className="text-xs text-gray-400 font-mono">NPI {p.npi}</div></td>
+                      <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[160px] truncate">{p.specialty}</td>
+                      <td className="px-4 py-2.5 text-xs text-gray-500">{p.city}, {p.state}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmtN(p.services)}</td>
+                      <td className="px-4 py-2.5"><ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -182,43 +201,89 @@ function FacilityDetailView({ facility, onBack }: { facility: typeof facilities[
 
 interface FacilitiesViewProps {
   setActiveView: (v: string) => void;
+  setSelectedNpi: (npi: string) => void;
 }
 
-export default function FacilitiesView({ setActiveView }: FacilitiesViewProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+export default function FacilitiesView({ setActiveView, setSelectedNpi }: FacilitiesViewProps) {
+  const [query, setQuery] = useState('');
+  const [stateFilter, setStateFilter] = useState('');
+  const [results, setResults] = useState<NppesResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [selected, setSelected] = useState<NppesResult | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  if (selectedId) {
-    const fac = facilities.find(f => f.id === selectedId);
-    if (fac) return <FacilityDetailView facility={fac} onBack={() => setSelectedId(null)} />;
-  }
+  const search = useCallback(async (q: string, state: string) => {
+    if (!q.trim()) { setResults([]); setTotalCount(0); return; }
+    setLoading(true); setError(null);
+    try {
+      const data = await searchNppes({ organization_name: q.trim(), enumeration_type: 'NPI-2', state: state || undefined, limit: 25 });
+      setResults(data.results ?? []);
+      setTotalCount(data.result_count ?? 0);
+    } catch (e) { setError((e as Error).message ?? 'Search failed'); }
+    finally { setLoading(false); }
+  }, []);
+
+  const trigger = (q: string, state: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => search(q, state), 500);
+  };
+
+  if (selected) return <FacilityDetail org={selected} onBack={() => setSelected(null)} setActiveView={setActiveView} setSelectedNpi={setSelectedNpi} />;
 
   return (
-    <div className="p-6 fade-in">
-      <div className="grid grid-cols-1 gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <input className="input flex-1" placeholder="Search facilities by name, city, IDN..." />
-          <select className="select w-40">
-            <option>All Types</option>
-            <option>Hospital</option>
-            <option>ASC</option>
-            <option>Clinic</option>
+    <div className="flex flex-col h-full fade-in">
+      <div className="p-4 border-b border-gray-100 bg-white space-y-3">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input className="input pl-9 pr-9" placeholder="Search by health system, hospital, or clinic name…" value={query}
+              onChange={e => { setQuery(e.target.value); trigger(e.target.value, stateFilter); }} />
+            {query && <button onClick={() => { setQuery(''); setResults([]); }} className="absolute right-3 top-1/2 -translate-y-1/2"><X className="w-4 h-4 text-gray-400 hover:text-gray-600" /></button>}
+          </div>
+          <select className="select w-28" value={stateFilter} onChange={e => { setStateFilter(e.target.value); trigger(query, e.target.value); }}>
+            <option value="">All States</option>
+            {US_STATES.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          <select className="select w-40">
-            <option>All IDNs</option>
-            <option>UCSF Health</option>
-            <option>Sutter Health</option>
-            <option>Stanford Health Care</option>
-          </select>
+        </div>
+        <div className="flex items-center justify-between text-sm text-gray-500">
+          {loading && <div className="flex items-center gap-1.5"><Loader2 className="w-4 h-4 animate-spin text-blue-500" />Searching NPPES…</div>}
+          {!loading && results.length > 0 && <span><span className="font-semibold text-gray-900">{results.length}</span>{totalCount > results.length ? ` of ${totalCount.toLocaleString()}` : ''} organizations found</span>}
+          {!loading && !query && <span className="text-gray-400">Search the NPPES registry for health systems, hospitals, and clinics</span>}
+          <span className="flex items-center gap-1 text-xs text-gray-400 ml-auto"><Building2 className="w-3.5 h-3.5" />NPPES + Medicare PUF 2023</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        {facilities.map(fac => (
-          <FacilityCard key={fac.id} facility={fac} onSelect={() => setSelectedId(fac.id)} />
-        ))}
-      </div>
+      {error && <div className="mx-4 mt-4 flex items-center gap-2 p-3 bg-red-50 text-red-700 rounded-lg text-sm"><AlertCircle className="w-4 h-4 flex-shrink-0" />{error}</div>}
+
+      {!query && (
+        <div className="flex-1 flex flex-col items-center justify-center text-center p-12 text-gray-400">
+          <Building2 className="w-12 h-12 mb-4 opacity-20" />
+          <div className="text-lg font-medium text-gray-500 mb-1">Find any health system or facility</div>
+          <div className="text-sm max-w-sm">Search by organization name to see their Medicare CPT billing mix, revenue by procedure, and individual providers — sourced from NPPES and the 2023 Medicare PUF.</div>
+          <div className="mt-5 flex flex-wrap gap-2 justify-center">
+            {['Mayo Clinic', 'Kaiser Permanente', 'Cleveland Clinic', 'HCA Healthcare', 'Ascension'].map(n => (
+              <button key={n} onClick={() => { setQuery(n); search(n, stateFilter); }}
+                className="px-3 py-1.5 bg-gray-100 hover:bg-blue-50 hover:text-blue-700 rounded-lg text-xs text-gray-600 transition-colors">{n}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {results.length > 0 && (
+        <div className="flex-1 overflow-auto p-4">
+          <div className="grid grid-cols-1 gap-3 max-w-3xl">
+            {results.map(org => <OrgCard key={org.number} org={org} onSelect={() => setSelected(org)} />)}
+          </div>
+          {totalCount > results.length && <p className="text-center text-xs text-gray-400 mt-4">Showing {results.length} of {totalCount.toLocaleString()} — refine to narrow results</p>}
+        </div>
+      )}
+      {loading && results.length === 0 && (
+        <div className="flex-1 p-4 space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-20 bg-gray-100 rounded-xl animate-pulse" style={{ opacity: 1 - i * 0.15 }} />)}
+        </div>
+      )}
     </div>
   );
 }
-
-import { useState } from 'react';

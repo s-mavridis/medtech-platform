@@ -1,20 +1,15 @@
 import {
-  LayoutDashboard, Search, Building2, Map, GitBranch,
-  Target, Activity, TrendingUp, Users, Settings, Stethoscope
+  Search, Building2, Map, GitBranch, Activity, Stethoscope, Settings
 } from 'lucide-react';
 
 interface NavItem { id: string; label: string; icon: React.ElementType; }
 
 const navItems: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'search', label: 'Provider Search', icon: Search },
-  { id: 'cpt', label: 'CPT Explorer', icon: Stethoscope },
-  { id: 'facilities', label: 'Facilities', icon: Building2 },
-  { id: 'territory', label: 'Territory Analytics', icon: Map },
-  { id: 'referrals', label: 'Referral Network', icon: GitBranch },
-  { id: 'strategies', label: 'Strategy Engine', icon: Target },
-  { id: 'trends', label: 'Market Trends', icon: TrendingUp },
-  { id: 'team', label: 'Team Performance', icon: Users },
+  { id: 'search',     label: 'Provider Search',    icon: Search },
+  { id: 'cpt',        label: 'CPT Explorer',        icon: Stethoscope },
+  { id: 'facilities', label: 'Facilities',          icon: Building2 },
+  { id: 'territory',  label: 'Territory Analytics', icon: Map },
+  { id: 'referrals',  label: 'Referral Network',    icon: GitBranch },
 ];
 
 interface SidebarProps {
@@ -25,7 +20,6 @@ interface SidebarProps {
 export default function Sidebar({ activeView, setActiveView }: SidebarProps) {
   return (
     <aside className="w-60 min-h-screen bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
-      {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
         <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
           <Activity className="w-4 h-4 text-white" />
@@ -36,7 +30,6 @@ export default function Sidebar({ activeView, setActiveView }: SidebarProps) {
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
         {navItems.map(item => (
           <button
@@ -50,7 +43,6 @@ export default function Sidebar({ activeView, setActiveView }: SidebarProps) {
         ))}
       </nav>
 
-      {/* Data sources badge */}
       <div className="px-4 py-3 border-t border-gray-100">
         <div className="text-xs text-gray-400 font-medium mb-1.5">Live Data Sources</div>
         <div className="space-y-1 text-xs text-gray-500">
@@ -60,7 +52,6 @@ export default function Sidebar({ activeView, setActiveView }: SidebarProps) {
         </div>
       </div>
 
-      {/* Settings */}
       <div className="px-3 pb-3">
         <button className="nav-item-inactive w-full text-left">
           <Settings className="w-4 h-4" /> Settings

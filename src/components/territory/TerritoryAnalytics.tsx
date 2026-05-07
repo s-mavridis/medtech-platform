@@ -1,224 +1,249 @@
-import { TrendingUp, TrendingDown, Users, DollarSign, Map, Target, BarChart2 } from 'lucide-react';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Legend
-} from 'recharts';
-import { territories } from '../../data/providers';
+import { useState, useEffect, useCallback } from 'react';
+import { Loader2, Map, AlertCircle, Users, Activity, DollarSign, TrendingUp } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { searchNppes } from '../../api/nppes';
+import { PUF_2023_ID } from '../../api/cms';
+import type { PhysicianPufRecord } from '../../api/cms';
 
-const quarterlyTrend = [
-  { quarter: 'Q1 2023', hip: 42, knee: 56, shoulder: 18 },
-  { quarter: 'Q2 2023', hip: 48, knee: 61, shoulder: 22 },
-  { quarter: 'Q3 2023', hip: 51, knee: 58, shoulder: 24 },
-  { quarter: 'Q4 2023', hip: 55, knee: 66, shoulder: 19 },
-  { quarter: 'Q1 2024', hip: 59, knee: 71, shoulder: 27 },
-  { quarter: 'Q2 2024', hip: 63, knee: 74, shoulder: 29 },
+const US_STATES = [
+  { abbr: 'AL', name: 'Alabama' }, { abbr: 'AK', name: 'Alaska' }, { abbr: 'AZ', name: 'Arizona' },
+  { abbr: 'AR', name: 'Arkansas' }, { abbr: 'CA', name: 'California' }, { abbr: 'CO', name: 'Colorado' },
+  { abbr: 'CT', name: 'Connecticut' }, { abbr: 'DE', name: 'Delaware' }, { abbr: 'FL', name: 'Florida' },
+  { abbr: 'GA', name: 'Georgia' }, { abbr: 'HI', name: 'Hawaii' }, { abbr: 'ID', name: 'Idaho' },
+  { abbr: 'IL', name: 'Illinois' }, { abbr: 'IN', name: 'Indiana' }, { abbr: 'IA', name: 'Iowa' },
+  { abbr: 'KS', name: 'Kansas' }, { abbr: 'KY', name: 'Kentucky' }, { abbr: 'LA', name: 'Louisiana' },
+  { abbr: 'ME', name: 'Maine' }, { abbr: 'MD', name: 'Maryland' }, { abbr: 'MA', name: 'Massachusetts' },
+  { abbr: 'MI', name: 'Michigan' }, { abbr: 'MN', name: 'Minnesota' }, { abbr: 'MS', name: 'Mississippi' },
+  { abbr: 'MO', name: 'Missouri' }, { abbr: 'MT', name: 'Montana' }, { abbr: 'NE', name: 'Nebraska' },
+  { abbr: 'NV', name: 'Nevada' }, { abbr: 'NH', name: 'New Hampshire' }, { abbr: 'NJ', name: 'New Jersey' },
+  { abbr: 'NM', name: 'New Mexico' }, { abbr: 'NY', name: 'New York' }, { abbr: 'NC', name: 'North Carolina' },
+  { abbr: 'ND', name: 'North Dakota' }, { abbr: 'OH', name: 'Ohio' }, { abbr: 'OK', name: 'Oklahoma' },
+  { abbr: 'OR', name: 'Oregon' }, { abbr: 'PA', name: 'Pennsylvania' }, { abbr: 'RI', name: 'Rhode Island' },
+  { abbr: 'SC', name: 'South Carolina' }, { abbr: 'SD', name: 'South Dakota' }, { abbr: 'TN', name: 'Tennessee' },
+  { abbr: 'TX', name: 'Texas' }, { abbr: 'UT', name: 'Utah' }, { abbr: 'VT', name: 'Vermont' },
+  { abbr: 'VA', name: 'Virginia' }, { abbr: 'WA', name: 'Washington' }, { abbr: 'WV', name: 'West Virginia' },
+  { abbr: 'WI', name: 'Wisconsin' }, { abbr: 'WY', name: 'Wyoming' }, { abbr: 'DC', name: 'DC' },
 ];
 
-const repComparison = [
-  { rep: 'Alex R.', tam: 18.4, revenue: 6.2, quota: 7.5, providers: 142 },
-  { rep: 'Morgan C.', tam: 12.8, revenue: 4.1, quota: 5.2, providers: 98 },
-  { rep: 'Jordan W.', tam: 9.2, revenue: 2.8, quota: 3.4, providers: 76 },
+const SPECIALTIES = [
+  { label: 'Orthopedic Surgery', tax: 'Orthopedic Surgery', color: '#3b82f6' },
+  { label: 'Internal Medicine',  tax: 'Internal Medicine',  color: '#8b5cf6' },
+  { label: 'Family Medicine',    tax: 'Family Medicine',    color: '#10b981' },
+  { label: 'Cardiology',         tax: 'Cardiology',         color: '#f59e0b' },
+  { label: 'General Surgery',    tax: 'General Surgery',    color: '#ef4444' },
+  { label: 'Neurology',          tax: 'Neurology',          color: '#06b6d4' },
+  { label: 'Rheumatology',       tax: 'Rheumatology',       color: '#ec4899' },
+  { label: 'Gastroenterology',   tax: 'Gastroenterology',   color: '#84cc16' },
 ];
 
-const procedureGrowth = [
-  { name: 'Hip Replacement', growth: 8.4, tam: 8.2, share: 34 },
-  { name: 'Knee Replacement', growth: 11.2, tam: 6.8, share: 28 },
-  { name: 'Shoulder', growth: 14.1, tam: 3.1, share: 12 },
-  { name: 'Spine Fusion', growth: 3.2, tam: 4.4, share: 18 },
-  { name: 'Foot & Ankle', growth: 6.7, tam: 1.8, share: 7 },
-];
+const fmt$ = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const fmtN = (n: number) => n.toLocaleString();
 
-const zipData = [
-  { zip: '94108 (SF Financial)', providers: 8, tam: 2.4, opp: 94 },
-  { zip: '94115 (Pacific Hts)', providers: 12, tam: 3.1, opp: 91 },
-  { zip: '94158 (Mission Bay)', providers: 6, tam: 2.8, opp: 97 },
-  { zip: '94118 (Inner Richmond)', providers: 10, tam: 1.9, opp: 78 },
-  { zip: '94143 (Parnassus)', providers: 15, tam: 2.6, opp: 82 },
-];
+interface TerritoryData {
+  state: string;
+  specialtyCounts: { label: string; count: number; color: string }[];
+  totalProviders: number;
+  topProcedures: { hcpcs: string; desc: string; services: number; revenue: number }[];
+  totalServices: number;
+  totalRevenue: number;
+}
 
-const radarData = [
-  { metric: 'Volume', SF: 85, Peninsula: 70, EastBay: 55 },
-  { metric: 'Commercial Mix', SF: 80, Peninsula: 88, EastBay: 62 },
-  { metric: 'Competitor Gap', SF: 72, Peninsula: 68, EastBay: 80 },
-  { metric: 'Growth Rate', SF: 78, Peninsula: 75, EastBay: 82 },
-  { metric: 'Coverage', SF: 90, Peninsula: 72, EastBay: 58 },
-];
+async function fetchTerritoryData(stateAbbr: string): Promise<TerritoryData> {
+  // 1. Provider counts by specialty from NPPES (parallel, limit=1 just to get result_count)
+  const specialtyResults = await Promise.allSettled(
+    SPECIALTIES.map(s =>
+      searchNppes({ taxonomy_description: s.tax, state: stateAbbr, enumeration_type: 'NPI-1', limit: 1 })
+        .then(r => ({ label: s.label, count: r.result_count ?? 0, color: s.color }))
+    )
+  );
+  const specialtyCounts = specialtyResults
+    .map(r => r.status === 'fulfilled' ? r.value : null)
+    .filter(Boolean) as { label: string; count: number; color: string }[];
+  const totalProviders = specialtyCounts.reduce((s, r) => s + r.count, 0);
+
+  // 2. Top procedures from Medicare PUF for this state
+  let topProcedures: { hcpcs: string; desc: string; services: number; revenue: number }[] = [];
+  let totalServices = 0;
+  let totalRevenue = 0;
+  try {
+    const params = new URLSearchParams({ 'filter[Rndrng_Prvdr_State_Abrvtn]': stateAbbr, size: '500' });
+    const resp = await fetch(`/api/cms-data/${PUF_2023_ID}/data?${params}`, { signal: AbortSignal.timeout(15000) });
+    if (resp.ok) {
+      const rows: PhysicianPufRecord[] = await resp.json();
+      const agg: Record<string, { hcpcs: string; desc: string; services: number; revenue: number }> = {};
+      for (const r of rows) {
+        const svc = parseInt(r.Tot_Srvcs) || 0;
+        const amt = parseFloat(r.Avg_Mdcr_Alowd_Amt) || 0;
+        if (agg[r.HCPCS_Cd]) { agg[r.HCPCS_Cd].services += svc; agg[r.HCPCS_Cd].revenue += svc * amt; }
+        else { agg[r.HCPCS_Cd] = { hcpcs: r.HCPCS_Cd, desc: r.HCPCS_Desc, services: svc, revenue: svc * amt }; }
+      }
+      topProcedures = Object.values(agg).sort((a, b) => b.services - a.services).slice(0, 20);
+      totalServices = rows.reduce((s, r) => s + (parseInt(r.Tot_Srvcs) || 0), 0);
+      totalRevenue = topProcedures.reduce((s, r) => s + r.revenue, 0);
+    }
+  } catch { /* PUF optional — show specialty data regardless */ }
+
+  return { state: stateAbbr, specialtyCounts, totalProviders, topProcedures, totalServices, totalRevenue };
+}
 
 export default function TerritoryAnalytics() {
+  const [selectedState, setSelectedState] = useState('CA');
+  const [data, setData] = useState<TerritoryData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (state: string) => {
+    setLoading(true); setError(null); setData(null);
+    try {
+      const result = await fetchTerritoryData(state);
+      setData(result);
+    } catch (e) {
+      setError((e as Error).message ?? 'Failed to load territory data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(selectedState); }, [selectedState, load]);
+
+  const stateName = US_STATES.find(s => s.abbr === selectedState)?.name ?? selectedState;
+
   return (
-    <div className="p-6 space-y-6 fade-in">
-      {/* Territory selector */}
-      <div className="flex items-center gap-3">
-        <select className="select w-56">
-          {territories.map(t => <option key={t.id}>{t.name}</option>)}
-          <option>All Territories</option>
-        </select>
-        <select className="select w-40">
-          <option>2024 (YTD)</option>
-          <option>2023 Full Year</option>
-          <option>Last 6 months</option>
-        </select>
-        <select className="select w-44">
-          <option>All Procedures</option>
-          <option>Hip Replacement</option>
-          <option>Knee Replacement</option>
-        </select>
-        <span className="text-xs text-gray-400 ml-auto">Data: CMS Medicare 2023 PUF + Employer Claims Proxy</span>
+    <div className="flex flex-col h-full fade-in">
+      {/* Header */}
+      <div className="p-4 border-b border-gray-100 bg-white flex items-center justify-between">
+        <div>
+          <h2 className="font-semibold text-gray-900">Territory Analytics</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Live data from NPPES NPI Registry + Medicare PUF 2023</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Map className="w-4 h-4 text-gray-400" />
+          <select className="select w-52" value={selectedState} onChange={e => setSelectedState(e.target.value)}>
+            {US_STATES.map(s => <option key={s.abbr} value={s.abbr}>{s.name}</option>)}
+          </select>
+        </div>
       </div>
 
-      {/* TAM cards */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: 'Total Addressable Market', value: '$40.4M', sub: 'SF Bay Area · All procedures', icon: DollarSign, color: 'bg-blue-500', trend: '+9.2%' },
-          { label: 'Current Territory Revenue', value: '$13.1M', sub: 'Across 3 reps', icon: TrendingUp, color: 'bg-green-500', trend: '+14.8%' },
-          { label: 'Market Share', value: '32%', sub: 'Est. vs total market', icon: BarChart2, color: 'bg-purple-500', trend: '+3.1pp' },
-          { label: 'Providers in Market', value: '316', sub: '142 / 98 / 76 by territory', icon: Users, color: 'bg-amber-500', trend: '+18 this Q' },
-        ].map(card => (
-          <div key={card.label} className="stat-card">
-            <div className="flex items-center justify-between">
-              <div className={`w-9 h-9 ${card.color} rounded-lg flex items-center justify-center`}>
-                <card.icon className="w-4 h-4 text-white" />
-              </div>
-              <span className="text-xs font-medium text-green-600 flex items-center gap-0.5">
-                <TrendingUp className="w-3 h-3" />{card.trend}
-              </span>
+      {loading && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-gray-400">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+          <p className="text-sm">Querying NPPES + Medicare PUF for {stateName}…</p>
+          <p className="text-xs text-gray-300">Running {SPECIALTIES.length} specialty queries in parallel</p>
+        </div>
+      )}
+
+      {error && <div className="m-4 flex items-center gap-2 p-3 bg-red-50 text-red-700 rounded-lg text-sm"><AlertCircle className="w-4 h-4 flex-shrink-0" />{error}</div>}
+
+      {data && !loading && (
+        <div className="flex-1 overflow-auto p-4 space-y-4">
+          {/* KPI strip */}
+          <div className="grid grid-cols-4 gap-3">
+            <div className="card text-center p-3">
+              <div className="flex items-center justify-center gap-1 text-xs text-blue-600 mb-1"><Users className="w-3.5 h-3.5" />Total Providers</div>
+              <div className="text-2xl font-bold text-blue-900">{fmtN(data.totalProviders)}</div>
+              <div className="text-xs text-gray-400">across {SPECIALTIES.length} specialties</div>
             </div>
-            <div className="mt-3">
-              <div className="text-2xl font-bold text-gray-900">{card.value}</div>
-              <div className="text-sm text-gray-500">{card.label}</div>
-              <div className="text-xs text-gray-400">{card.sub}</div>
+            <div className="card text-center p-3">
+              <div className="flex items-center justify-center gap-1 text-xs text-purple-600 mb-1"><Activity className="w-3.5 h-3.5" />Medicare Services</div>
+              <div className="text-2xl font-bold text-purple-900">{data.totalServices > 0 ? fmtN(data.totalServices) : '—'}</div>
+              <div className="text-xs text-gray-400">sample · 2023 PUF</div>
+            </div>
+            <div className="card text-center p-3">
+              <div className="flex items-center justify-center gap-1 text-xs text-green-600 mb-1"><DollarSign className="w-3.5 h-3.5" />Est. Revenue (sample)</div>
+              <div className="text-2xl font-bold text-green-900">{data.totalRevenue > 0 ? fmt$(data.totalRevenue) : '—'}</div>
+              <div className="text-xs text-gray-400">Medicare allowed</div>
+            </div>
+            <div className="card text-center p-3">
+              <div className="flex items-center justify-center gap-1 text-xs text-orange-600 mb-1"><TrendingUp className="w-3.5 h-3.5" />Top Specialty</div>
+              <div className="text-lg font-bold text-orange-900 leading-tight">{data.specialtyCounts.sort((a, b) => b.count - a.count)[0]?.label ?? '—'}</div>
+              <div className="text-xs text-gray-400">{fmtN(data.specialtyCounts[0]?.count ?? 0)} providers</div>
             </div>
           </div>
-        ))}
-      </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        {/* Quarterly trend */}
-        <div className="card p-5">
-          <div className="section-title mb-1">Procedure Volume Trend</div>
-          <div className="text-sm text-gray-500 mb-4">SF Bay Area · Quarterly</div>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={quarterlyTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="quarter" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="hip" name="Hip" fill="#3b82f6" stackId="a" radius={[0,0,0,0]} />
-              <Bar dataKey="knee" name="Knee" fill="#8b5cf6" stackId="a" />
-              <Bar dataKey="shoulder" name="Shoulder" fill="#06b6d4" stackId="a" radius={[3,3,0,0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+          {/* Specialty breakdown */}
+          <div className="card">
+            <div className="font-semibold text-gray-800 mb-1">Provider Count by Specialty · {stateName}</div>
+            <div className="text-xs text-gray-400 mb-3">Live from NPPES NPI Registry — individual providers (NPI-1) with active enrollment</div>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart
+                data={[...data.specialtyCounts].sort((a, b) => b.count - a.count).map(s => ({ name: s.label.replace(' Medicine', ' Med.').replace('Gastroenterology', 'Gastro.'), count: s.count, color: s.color }))}
+                margin={{ left: 10, bottom: 40 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" interval={0} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={n => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n)} />
+                <Tooltip formatter={(v: number) => [fmtN(v) + ' providers']} />
+                <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                  {data.specialtyCounts.map((s, i) => <Cell key={i} fill={s.color} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
 
-        {/* Radar comparison */}
-        <div className="card p-5">
-          <div className="section-title mb-1">Territory Comparison</div>
-          <div className="text-sm text-gray-500 mb-4">Multi-dimension performance score</div>
-          <ResponsiveContainer width="100%" height={220}>
-            <RadarChart data={radarData}>
-              <PolarGrid />
-              <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11, fill: '#6b7280' }} />
-              <PolarRadiusAxis domain={[0, 100]} tick={false} />
-              <Radar name="SF Bay North" dataKey="SF" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.2} />
-              <Radar name="Peninsula" dataKey="Peninsula" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.15} />
-              <Radar name="East Bay" dataKey="EastBay" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.15} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-            </RadarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Rep comparison */}
-      <div className="card p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="section-title">Territory Performance</div>
-          <button className="btn-secondary text-xs">Fair Opportunity Simulator</button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="pb-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Rep / Territory</th>
-                <th className="pb-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">TAM</th>
-                <th className="pb-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Revenue</th>
-                <th className="pb-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Quota</th>
-                <th className="pb-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-48">Quota Attainment</th>
-                <th className="pb-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Providers</th>
-              </tr>
-            </thead>
-            <tbody>
-              {repComparison.map((rep, i) => {
-                const pct = Math.round((rep.revenue / rep.quota) * 100);
-                return (
-                  <tr key={i} className="border-b border-gray-50">
-                    <td className="py-3 font-medium text-gray-900">{rep.rep}</td>
-                    <td className="py-3 text-right text-gray-700">${rep.tam}M</td>
-                    <td className="py-3 text-right font-semibold text-gray-900">${rep.revenue}M</td>
-                    <td className="py-3 text-right text-gray-500">${rep.quota}M</td>
-                    <td className="py-3">
-                      <div className="flex items-center gap-2 ml-2">
-                        <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${pct >= 90 ? 'bg-green-500' : pct >= 70 ? 'bg-amber-500' : 'bg-red-400'}`}
-                            style={{ width: `${Math.min(100, pct)}%` }} />
-                        </div>
-                        <span className={`text-xs font-semibold w-8 ${pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-amber-600' : 'text-red-500'}`}>
-                          {pct}%
-                        </span>
+          {/* Specialty table */}
+          <div className="card overflow-hidden p-0">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <span className="font-semibold text-gray-800 text-sm">Specialty Breakdown — {stateName}</span>
+              <span className="text-xs text-gray-400 ml-2">NPPES result counts · NPI-1 individual providers</span>
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Specialty</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Providers</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Share</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50 bg-white">
+                {[...data.specialtyCounts].sort((a, b) => b.count - a.count).map(s => (
+                  <tr key={s.label} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: s.color }} />
+                        <span className="font-medium text-gray-800">{s.label}</span>
                       </div>
                     </td>
-                    <td className="py-3 text-right text-gray-700">{rep.providers}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmtN(s.count)}</td>
+                    <td className="px-4 py-2.5 text-right text-gray-500">
+                      {data.totalProviders > 0 ? `${((s.count / data.totalProviders) * 100).toFixed(1)}%` : '—'}
+                    </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-6">
-        {/* Procedure growth */}
-        <div className="card p-5">
-          <div className="section-title mb-4">Market Growth by Procedure</div>
-          <div className="space-y-3">
-            {procedureGrowth.map(p => (
-              <div key={p.name} className="flex items-center gap-3">
-                <div className="w-36 text-sm text-gray-700 flex-shrink-0">{p.name}</div>
-                <div className="flex-1">
-                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, p.growth * 5)}%` }} />
-                  </div>
-                </div>
-                <span className="text-sm font-semibold text-green-600 w-12 text-right">+{p.growth}%</span>
-                <span className="text-xs text-gray-400 w-12 text-right">${p.tam}M TAM</span>
-              </div>
-            ))}
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
 
-        {/* Zip code heat */}
-        <div className="card p-5">
-          <div className="section-title mb-4">Opportunity by Zip Code</div>
-          <div className="space-y-2">
-            {zipData.map(z => (
-              <div key={z.zip} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg">
-                <div>
-                  <div className="text-sm font-medium text-gray-900">{z.zip}</div>
-                  <div className="text-xs text-gray-500">{z.providers} providers</div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-gray-700">${z.tam}M TAM</span>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white ${
-                    z.opp >= 90 ? 'bg-red-500' : z.opp >= 80 ? 'bg-amber-500' : 'bg-blue-400'
-                  }`}>
-                    {z.opp}
-                  </div>
-                </div>
+          {/* Top procedures */}
+          {data.topProcedures.length > 0 && (
+            <div className="card overflow-hidden p-0">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <span className="font-semibold text-gray-800 text-sm">Top Medicare Procedures · {stateName}</span>
+                <span className="text-xs text-gray-400 ml-2">Medicare PUF 2023 · sample of 500 rows</span>
               </div>
-            ))}
-          </div>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">HCPCS</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Procedure</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Services</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Est. Revenue</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 bg-white">
+                  {data.topProcedures.slice(0, 15).map((p, i) => (
+                    <tr key={p.hcpcs + i} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5 font-mono text-xs font-semibold text-blue-700">{p.hcpcs}</td>
+                      <td className="px-4 py-2.5 text-gray-700 max-w-sm truncate">{p.desc}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmtN(p.services)}</td>
+                      <td className="px-4 py-2.5 text-right font-medium text-green-700">{fmt$(p.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
