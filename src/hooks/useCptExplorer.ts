@@ -88,6 +88,7 @@ function aggregateInstitutions(rows: CptProviderRow[]): InstitutionAggregate[] {
 
 export interface CptExplorerState {
   summary: CptSummary | null;
+  rawRows: CptProviderRow[];   // all fetched rows, for state-level filtering
   loading: boolean;
   error: string | null;
 }
@@ -95,17 +96,18 @@ export interface CptExplorerState {
 export function useCptExplorer() {
   const [state, setState] = useState<CptExplorerState>({
     summary: null,
+    rawRows: [],
     loading: false,
     error: null,
   });
 
   const search = useCallback(async (hcpcsCode: string, year: '2023' | '2022' = '2023') => {
     if (!hcpcsCode.trim()) return;
-    setState({ summary: null, loading: true, error: null });
+    setState({ summary: null, rawRows: [], loading: true, error: null });
     try {
       const rows = await getCptProviders(hcpcsCode, { limit: 500, year });
       if (rows.length === 0) {
-        setState({ summary: null, loading: false, error: `No Medicare data found for CPT ${hcpcsCode} in ${year}. Check the code or try ${year === '2023' ? '2022' : '2023'}.` });
+        setState({ summary: null, rawRows: [], loading: false, error: `No Medicare data found for CPT ${hcpcsCode} in ${year}. Check the code or try ${year === '2023' ? '2022' : '2023'}.` });
         return;
       }
 
@@ -129,9 +131,9 @@ export function useCptExplorer() {
         isTruncated: rows.length >= 500,
       };
 
-      setState({ summary, loading: false, error: null });
+      setState({ summary, rawRows: rows, loading: false, error: null });
     } catch (e) {
-      setState({ summary: null, loading: false, error: (e as Error).message ?? 'Failed to load CPT data' });
+      setState({ summary: null, rawRows: [], loading: false, error: (e as Error).message ?? 'Failed to load CPT data' });
     }
   }, []);
 

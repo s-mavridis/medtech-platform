@@ -76,12 +76,15 @@ export interface NppesSearchParams {
 }
 
 export async function searchNppes(params: NppesSearchParams): Promise<NppesResponse> {
+  // NPPES supports * wildcard for partial matching (case-insensitive)
+  const wc = (s: string) => s.trim().endsWith('*') ? s.trim() : s.trim() + '*';
+
   const p: Record<string, string> = { version: '2.1' };
   if (params.number) p['number'] = params.number;
-  if (params.organization_name) p['organization_name'] = params.organization_name;
-  if (params.first_name) p['first_name'] = params.first_name;
-  if (params.last_name) p['last_name'] = params.last_name;
-  if (params.taxonomy_description) p['taxonomy_description'] = params.taxonomy_description;
+  if (params.organization_name) p['organization_name'] = wc(params.organization_name);
+  if (params.first_name) p['first_name'] = wc(params.first_name);
+  if (params.last_name) p['last_name'] = wc(params.last_name);
+  if (params.taxonomy_description) p['taxonomy_description'] = params.taxonomy_description; // exact match for taxonomy
   if (params.city) p['city'] = params.city;
   if (params.state) p['state'] = params.state;
   if (params.postal_code) p['postal_code'] = params.postal_code;

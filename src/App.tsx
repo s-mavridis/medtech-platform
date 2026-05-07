@@ -12,10 +12,16 @@ export default function App() {
   const [activeView, setActiveView] = useState('search');
   const [selectedNpi, setSelectedNpi] = useState<string | null>(null);
   const [previousView, setPreviousView] = useState('search');
+  const [facilityQuery, setFacilityQuery] = useState('');
 
   const navigateTo = (view: string) => {
     setPreviousView(activeView);
     setActiveView(view);
+  };
+
+  const goToFacility = (orgName: string) => {
+    setFacilityQuery(orgName);
+    navigateTo('facilities');
   };
 
   const renderView = () => {
@@ -24,12 +30,12 @@ export default function App() {
         return <ProviderSearch setActiveView={navigateTo} setSelectedNpi={setSelectedNpi} />;
       case 'profile':
         return selectedNpi
-          ? <ProviderProfile npi={selectedNpi} setActiveView={navigateTo} previousView={previousView} />
+          ? <ProviderProfile npi={selectedNpi} setActiveView={navigateTo} previousView={previousView} onFacilitySearch={goToFacility} />
           : <ProviderSearch setActiveView={navigateTo} setSelectedNpi={setSelectedNpi} />;
       case 'cpt':
         return <CptExplorer setActiveView={navigateTo} setSelectedNpi={setSelectedNpi} />;
       case 'facilities':
-        return <FacilitiesView setActiveView={navigateTo} setSelectedNpi={setSelectedNpi} />;
+        return <FacilitiesView setActiveView={navigateTo} setSelectedNpi={setSelectedNpi} initialQuery={facilityQuery} onQueryUsed={() => setFacilityQuery('')} />;
       case 'territory':
         return <TerritoryAnalytics />;
       case 'referrals':

@@ -233,6 +233,30 @@ function generateNameVariants(name: string): string[] {
   return [...set];
 }
 
+/** Search Physician Compare by organization name (LIKE match) — finds affiliated providers */
+export async function searchProvidersByOrg(
+  orgName: string,
+  limit = 100
+): Promise<PhysicianCompareRecord[]> {
+  // Use first meaningful word for broader LIKE match (e.g. "STANFORD" from "STANFORD HEALTHCARE")
+  const keyword = orgName.trim().toUpperCase().split(/\s+/)[0];
+  const params = new URLSearchParams();
+  params.set('conditions[0][property]', 'org_nm');
+  params.set('conditions[0][value]', keyword + '%');
+  params.set('conditions[0][operator]', 'LIKE');
+  params.set('limit', String(limit));
+  try {
+    const url = `${PROVIDER_DATA_BASE}/${PHYSICIAN_COMPARE_ID}/0?${params}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    // Filter client-side to ensure org name actually contains the full input keyword
+    const results: PhysicianCompareRecord[] = data.results ?? [];
+    const needle = orgName.trim().toUpperCase().split(/\s+/).slice(0, 2).join(' ');
+    return results.filter(r => (r.org_nm ?? '').toUpperCase().includes(needle));
+  } catch { return []; }
+}
+
 // CMS Provider Data — Physicians & Clinicians national file
 const PHYSICIAN_COMPARE_ID = 'mj5m-pzi6';
 const PROVIDER_DATA_BASE = '/api/cms-provider';

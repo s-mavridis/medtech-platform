@@ -149,9 +149,10 @@ interface ProviderProfileProps {
   npi: string;
   setActiveView: (v: string) => void;
   previousView: string;
+  onFacilitySearch?: (orgName: string) => void;
 }
 
-export default function ProviderProfile({ npi, setActiveView, previousView }: ProviderProfileProps) {
+export default function ProviderProfile({ npi, setActiveView, previousView, onFacilitySearch }: ProviderProfileProps) {
   const { data, loading, loadingPayments, loadingProcedures, error, usingDemo } = useProviderProfile(npi);
 
   if (loading) {
@@ -234,16 +235,33 @@ export default function ProviderProfile({ npi, setActiveView, previousView }: Pr
               <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-2">
                 <InfoRow icon={<MapPin className="w-4 h-4 text-gray-400" />} label={`${data.address}${data.city ? `, ${data.city}, ${data.state} ${data.zip}` : ''}`} />
                 {data.phone && <InfoRow icon={<Phone className="w-4 h-4 text-gray-400" />} label={data.phone} />}
-                {data.organization && <InfoRow icon={<Building2 className="w-4 h-4 text-gray-400" />} label={data.organization + (data.groupPracticeSize ? ` (${data.groupPracticeSize} members)` : '')} />}
+                {data.organization && (
+                  <div className="flex items-start gap-2">
+                    <Building2 className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+                    <button
+                      onClick={() => onFacilitySearch?.(data.organization!)}
+                      className={`text-sm text-left ${onFacilitySearch ? 'text-blue-600 hover:text-blue-800 hover:underline cursor-pointer' : 'text-gray-700'}`}
+                      title={onFacilitySearch ? 'View in Facilities' : undefined}
+                    >
+                      {data.organization}{data.groupPracticeSize ? ` (${data.groupPracticeSize} members)` : ''}
+                    </button>
+                  </div>
+                )}
                 {data.medSchool && <InfoRow icon={<GraduationCap className="w-4 h-4 text-gray-400" />} label={`${data.medSchool}${data.gradYear ? ` · ${data.gradYear}` : ''}`} />}
               </div>
 
               {data.hospitalAffiliations.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-gray-100">
-                  <div className="label mb-1">Hospital Affiliations</div>
+                  <div className="label mb-1">Hospital Affiliations <span className="text-gray-400 font-normal">(click to search in Facilities)</span></div>
                   <div className="flex flex-wrap gap-2">
                     {data.hospitalAffiliations.map(h => (
-                      <span key={h} className="badge-blue">{h}</span>
+                      <button
+                        key={h}
+                        onClick={() => onFacilitySearch?.(h)}
+                        className="badge-blue hover:bg-blue-200 cursor-pointer transition-colors"
+                      >
+                        {h}
+                      </button>
                     ))}
                   </div>
                 </div>
