@@ -157,20 +157,80 @@ export async function getCptProviders(
   return rows.map(parseRow).sort((a, b) => b.totalServices - a.totalServices);
 }
 
+/** Query Medicare PUF by NPI — works for both NPI-1 (individuals) and NPI-2 (org billers) */
+export async function getInstitutionCptByNpi(
+  npi: string,
+  options: { limit?: number } = {}
+): Promise<CptProviderRow[]> {
+  for (const id of [PUF_2023_ID, PUF_2022_ID]) {
+    try {
+      const params = new URLSearchParams({ 'filter[Rndrng_NPI]': npi, size: String(options.limit ?? 500) });
+      const resp = await fetch(`${BASE}/${id}/data?${params}`, { signal: AbortSignal.timeout(20000) });
+      if (!resp.ok) continue;
+      const rows: PhysicianPufRecord[] = await resp.json();
+      if (rows.length > 0 && 'HCPCS_Cd' in rows[0]) {
+        return rows.map(parseRow).sort((a, b) => b.totalServices - a.totalServices);
+      }
+    } catch { continue; }
+  }
+  return [];
+}
+
+/** Aggregate PUF data across multiple NPIs (health system view — max 8 parallel queries) */
+export async function getSystemCptProfile(
+  npis: string[],
+  options: { limit?: number } = {}
+): Promise<CptProviderRow[]> {
+  const results = await Promise.allSettled(
+    npis.slice(0, 8).map(npi => getInstitutionCptByNpi(npi, { limit: options.limit ?? 200 }))
+  );
+  return results
+    .filter((r): r is PromiseFulfilledResult<CptProviderRow[]> => r.status === 'fulfilled')
+    .flatMap(r => r.value)
+    .sort((a, b) => b.totalServices - a.totalServices);
+}
+
 /** Query by institution/org name — exact match as it appears in CMS data */
 export async function getInstitutionCptProfile(
   orgName: string,
   options: { limit?: number } = {}
 ): Promise<CptProviderRow[]> {
-  const id = PUF_2023_ID;
-  const params = new URLSearchParams({
-    'filter[Rndrng_Prvdr_Last_Org_Name]': orgName.trim().toUpperCase(),
-    size: String(options.limit ?? 500),
-  });
-  const resp = await fetch(`${BASE}/${id}/data?${params}`, { signal: AbortSignal.timeout(20000) });
-  if (!resp.ok) throw new Error(`CMS PUF API error ${resp.status}`);
-  const rows: PhysicianPufRecord[] = await resp.json();
-  return rows.map(parseRow).sort((a, b) => b.totalServices - a.totalServices);
+  // Try the name as-is (uppercased), then common variants
+  const variants = generateNameVariants(orgName);
+  for (const variant of variants) {
+    try {
+      const params = new URLSearchParams({
+        'filter[Rndrng_Prvdr_Last_Org_Name]': variant,
+        size: String(options.limit ?? 500),
+      });
+      const resp = await fetch(`${BASE}/${PUF_2023_ID}/data?${params}`, { signal: AbortSignal.timeout(20000) });
+      if (!resp.ok) continue;
+      const rows: PhysicianPufRecord[] = await resp.json();
+      if (rows.length > 0 && 'HCPCS_Cd' in rows[0]) {
+        return rows.map(parseRow).sort((a, b) => b.totalServices - a.totalServices);
+      }
+    } catch { continue; }
+  }
+  return [];
+}
+
+function generateNameVariants(name: string): string[] {
+  const up = name.trim().toUpperCase();
+  const set = new Set<string>([up]);
+  // HEALTH CARE <-> HEALTHCARE
+  set.add(up.replace(/\bHEALTHCARE\b/g, 'HEALTH CARE'));
+  set.add(up.replace(/\bHEALTH CARE\b/g, 'HEALTHCARE'));
+  // MEDICAL CENTER variants
+  set.add(up.replace(/\bMEDICAL CENTER\b/g, 'MED CTR'));
+  set.add(up.replace(/\bMED CTR\b/g, 'MEDICAL CENTER'));
+  // HOSPITAL variants
+  set.add(up.replace(/\bHOSPITAL\b/g, 'HOSP'));
+  set.add(up.replace(/\bHOSP\b/g, 'HOSPITAL'));
+  // Strip common suffixes
+  const stripped = up.replace(/\b(INC|LLC|CORP|LTD|DBA)\b\.?/g, '').replace(/\s+/g, ' ').trim();
+  if (stripped) set.add(stripped);
+  set.delete('');
+  return [...set];
 }
 
 // CMS Provider Data — Physicians & Clinicians national file
