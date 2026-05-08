@@ -250,41 +250,84 @@ function significantWords(orgName: string): string[] {
   return normalizeOrgName(orgName).split(' ').filter(w => w.length > 2 && !ORG_SKIP_WORDS.has(w));
 }
 
-/** Search Physician Compare by organization name (LIKE match) — finds affiliated providers */
+/** Search Physician Compare by organization name (LIKE contains match) — finds affiliated providers */
 export async function searchProvidersByOrg(
   orgName: string,
   limit = 100
 ): Promise<PhysicianCompareRecord[]> {
   const words = significantWords(orgName);
   if (!words.length) return [];
-  const keyword = words[0]; // e.g. "STANFORD" from "STANFORD CHILDREN'S HOSPITAL"
 
-  const params = new URLSearchParams();
-  params.set('conditions[0][property]', 'org_nm');
-  params.set('conditions[0][value]', keyword + '%');
-  params.set('conditions[0][operator]', 'LIKE');
-  params.set('limit', String(limit));
-  try {
-    const url = `${PROVIDER_DATA_BASE}/${PHYSICIAN_COMPARE_ID}/0?${params}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    const results: PhysicianCompareRecord[] = data.results ?? [];
-    if (!results.length) return [];
+  // Sort by length descending — longer words are more distinctive (BRIGHAM > MASS, PERMANENTE > KAISER)
+  const sortedWords = [...words].sort((a, b) => b.length - a.length || a.localeCompare(b));
 
-    // Client-side refinement: if more than one significant word exists,
-    // require org_nm to also contain at least one additional significant word
-    if (words.length > 1) {
-      const extra = words.slice(1);
+  // Try each keyword (most distinctive first) until we get a refined match
+  for (const keyword of sortedWords.slice(0, 3)) {
+    const params = new URLSearchParams();
+    params.set('conditions[0][property]', 'org_nm');
+    // Use %keyword% (contains) so "BRIGHAM" matches "BRIGHAM AND WOMEN'S HOSPITAL"
+    // and "GENERAL" matches "MASSACHUSETTS GENERAL HOSPITAL"
+    params.set('conditions[0][value]', '%' + keyword + '%');
+    params.set('conditions[0][operator]', 'LIKE');
+    params.set('limit', String(limit));
+    try {
+      const url = `${PROVIDER_DATA_BASE}/${PHYSICIAN_COMPARE_ID}/0?${params}`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const results: PhysicianCompareRecord[] = data.results ?? [];
+      if (!results.length) continue;
+
+      // Single distinctive word — return as-is
+      const otherWords = words.filter(w => w !== keyword);
+      if (!otherWords.length) return results;
+
+      // Require org_nm to contain at least one other significant word from the search org name
+      // e.g. for MGB: %BRIGHAM% results refined to those also containing "MASS" or "GENERAL"
+      //   → "BRIGHAM AND WOMEN'S..." filtered out; "MASS GENERAL BRIGHAM" kept
+      //   → "MASSACHUSETTS GENERAL HOSPITAL" also kept (MASS substring matches "MASS")
       const refined = results.filter(r => {
         const norm = normalizeOrgName(r.org_nm ?? '');
-        return extra.some(w => norm.includes(w));
+        return otherWords.some(w => norm.includes(w));
       });
-      // Fall back to unrefined if filtering was too strict
-      return refined.length > 0 ? refined : results;
+
+      if (refined.length > 0) return refined;
+      // Refined was empty for this keyword (results exist but don't match our org)
+      // → try next most distinctive word
+    } catch { continue; }
+  }
+  return [];
+}
+
+/** Look up a provider in Physician Compare by last name + state (fallback when NPI lookup returns nothing) */
+export async function getPhysicianCompareByName(
+  lastName: string,
+  firstName: string,
+  state?: string
+): Promise<PhysicianCompareRecord | null> {
+  if (!lastName) return null;
+  try {
+    const params = new URLSearchParams();
+    params.set('conditions[0][property]', 'lst_nm');
+    params.set('conditions[0][value]', lastName.toUpperCase());
+    params.set('conditions[0][operator]', '=');
+    if (state) {
+      params.set('conditions[1][property]', 'st');
+      params.set('conditions[1][value]', state.toUpperCase());
+      params.set('conditions[1][operator]', '=');
     }
-    return results;
-  } catch { return []; }
+    params.set('limit', '20');
+    const url = `${PROVIDER_DATA_BASE}/${PHYSICIAN_COMPARE_ID}/0?${params}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const results: PhysicianCompareRecord[] = data.results ?? [];
+    if (!results.length) return null;
+    // Find best match by first name prefix (handle middle name in first name slot)
+    const firstUp = firstName.toUpperCase().slice(0, 3);
+    const match = results.find(r => r.frst_nm?.toUpperCase().startsWith(firstUp));
+    return match ?? results[0];
+  } catch { return null; }
 }
 
 // CMS Provider Data — Physicians & Clinicians national file

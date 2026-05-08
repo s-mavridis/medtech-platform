@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { lookupNpi, getDisplayName, getPracticeAddress, getPrimaryTaxonomy, mapSpecialty } from '../api/nppes';
 import { getPaymentsByNpi, aggregatePayments } from '../api/openPayments';
-import { getProcedureVolumesByNpi, getPhysicianCompare } from '../api/cms';
+import { getProcedureVolumesByNpi, getPhysicianCompare, getPhysicianCompareByName } from '../api/cms';
 import type { NppesResult } from '../api/nppes';
 import type { PaymentSummary } from '../api/openPayments';
 import type { ProcedureVolumeSummary, PhysicianCompareRecord } from '../api/cms';
@@ -129,6 +129,21 @@ export function useProviderProfile(npi: string | null) {
 
         const addr = getPracticeAddress(nppesResult);
         const tax = getPrimaryTaxonomy(nppesResult);
+
+        // Phase 1b: if Physician Compare returned nothing or has no org data,
+        // try a name+state lookup as fallback (common for PAs, NPs, newer providers)
+        let finalCompare = compareResult;
+        if (!finalCompare || (!finalCompare.org_nm && !finalCompare.hosp_afl_lbn_1)) {
+          const lastName = nppesResult.basic.last_name ?? '';
+          const firstName = nppesResult.basic.first_name ?? '';
+          if (lastName && addr?.state) {
+            try {
+              const byName = await getPhysicianCompareByName(lastName, firstName, addr.state);
+              if (byName) finalCompare = byName;
+            } catch { /* ignore */ }
+          }
+        }
+
         const base: ProfileData = {
           npi: nppesResult.number,
           displayName: getDisplayName(nppesResult),
@@ -143,11 +158,11 @@ export function useProviderProfile(npi: string | null) {
           zip: addr?.postal_code?.slice(0, 5) ?? '',
           phone: addr?.telephone_number ?? '',
           lastUpdated: nppesResult.basic.last_updated ?? '',
-          medSchool: compareResult?.Med_sch ?? null,
-          gradYear: compareResult?.Grd_yr ?? null,
-          organization: compareResult?.org_nm || compareResult?.hosp_afl_lbn_1 || null,
-          groupPracticeSize: compareResult?.num_org_mem ?? null,
-          hospitalAffiliations: buildHospitalList(compareResult),
+          medSchool: finalCompare?.Med_sch ?? null,
+          gradYear: finalCompare?.Grd_yr ?? null,
+          organization: finalCompare?.org_nm || finalCompare?.hosp_afl_lbn_1 || null,
+          groupPracticeSize: finalCompare?.num_org_mem ?? null,
+          hospitalAffiliations: buildHospitalList(finalCompare),
           payments: [],
           totalPayments: 0,
           topPayers: [],
