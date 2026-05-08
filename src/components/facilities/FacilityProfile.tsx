@@ -165,7 +165,8 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
   const [cptData, setCptData] = useState<CptProviderRow[] | null>(null);
   const [cptLoading, setCptLoading] = useState(true);
   const [cptError, setCptError] = useState<string | null>(null);
-  const [matchedBy, setMatchedBy] = useState<'npi' | 'name' | 'none' | null>(null);
+  const [matchedBy, setMatchedBy] = useState<'npi' | 'name' | 'affiliated' | 'none' | null>(null);
+  const [affPhysCount, setAffPhysCount] = useState(0);
   const [tab, setTab] = useState<'cpt' | 'providers' | 'physicians'>('cpt');
   const [groupByCategory, setGroupByCategory] = useState(false);
   const [physicians, setPhysicians] = useState<PhysicianCompareRecord[] | null>(null);
@@ -185,13 +186,33 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
       try {
         if (target.kind === 'system') {
           const rows = await getSystemCptProfile(npis, { limit: 200 });
-          setCptData(rows); setMatchedBy(rows.length > 0 ? 'npi' : 'none');
+          if (rows.length > 0) { setCptData(rows); setMatchedBy('npi'); setCptLoading(false); return; }
+          // System with no direct NPI data → aggregate from affiliated physicians
+          const physicians = await searchProvidersByOrg(name, 100);
+          if (physicians.length > 0) {
+            setPhysicians(physicians);
+            setAffPhysCount(physicians.length);
+            const physNpis = [...new Set(physicians.map(p => p.NPI))].slice(0, 20);
+            const affRows = await getSystemCptProfile(physNpis, { limit: 200 });
+            setCptData(affRows); setMatchedBy(affRows.length > 0 ? 'affiliated' : 'none');
+          } else {
+            setCptData([]); setMatchedBy('none');
+          }
         } else {
           const byNpi = await getInstitutionCptByNpi(target.org.number, { limit: 500 });
-          if (byNpi.length > 0) { setCptData(byNpi); setMatchedBy('npi'); }
-          else {
-            const byName = await getInstitutionCptProfile(name, { limit: 500 });
-            setCptData(byName); setMatchedBy(byName.length > 0 ? 'name' : 'none');
+          if (byNpi.length > 0) { setCptData(byNpi); setMatchedBy('npi'); setCptLoading(false); return; }
+          const byName = await getInstitutionCptProfile(name, { limit: 500 });
+          if (byName.length > 0) { setCptData(byName); setMatchedBy('name'); setCptLoading(false); return; }
+          // Both direct lookups failed — aggregate from affiliated physicians
+          const physResults = await searchProvidersByOrg(name, 100);
+          if (physResults.length > 0) {
+            setPhysicians(physResults);
+            setAffPhysCount(physResults.length);
+            const physNpis = [...new Set(physResults.map(p => p.NPI))].slice(0, 20);
+            const affRows = await getSystemCptProfile(physNpis, { limit: 200 });
+            setCptData(affRows); setMatchedBy(affRows.length > 0 ? 'affiliated' : 'none');
+          } else {
+            setCptData([]); setMatchedBy('none');
           }
         }
       } catch (e) { setCptError((e as Error).message ?? 'Failed to load data'); }
@@ -200,10 +221,12 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
   }
 
   const loadPhysicians = async () => {
+    // Already loaded (either by auto-aggregate or previous tab click)
     if (physicians !== null || physLoading) return;
     setPhysLoading(true);
     const results = await searchProvidersByOrg(name, 100);
     setPhysicians(results);
+    if (results.length > 0) setAffPhysCount(results.length);
     setPhysLoading(false);
   };
 
@@ -266,6 +289,7 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
             {npi && <div className="text-xs text-gray-400 font-mono mt-1">NPI {npi}</div>}
             {matchedBy === 'npi' && <div className="text-xs text-green-600 mt-0.5">✓ Matched by NPI in Medicare PUF 2023</div>}
             {matchedBy === 'name' && <div className="text-xs text-amber-600 mt-0.5">Matched by organization name in Medicare PUF 2023</div>}
+            {matchedBy === 'affiliated' && <div className="text-xs text-purple-700 mt-0.5">📊 Aggregated from {affPhysCount} affiliated physicians (Physician Compare + Medicare PUF)</div>}
           </div>
         </div>
         {cptData && cptData.length > 0 && (
@@ -309,7 +333,7 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
             <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
             <div>
               <strong>No Medicare billing data found for {name}.</strong>
-              <p className="mt-1">Large health systems like Stanford typically bill Medicare through individual physician NPIs, not the organization NPI. Check the <strong>Affiliated Physicians</strong> tab to find individual providers — or use Provider Search to find physicians by name.</p>
+              <p className="mt-1">We searched by NPI, organization name, and affiliated physician NPIs (via Physician Compare) — all returned no results. The facility may use a different legal name in CMS records, or bill under a parent entity. Try Provider Search to find individual physicians by name.</p>
             </div>
           </div>
         )}

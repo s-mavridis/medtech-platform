@@ -233,13 +233,32 @@ function generateNameVariants(name: string): string[] {
   return [...set];
 }
 
+// Words too generic to be useful org identifiers
+const ORG_SKIP_WORDS = new Set([
+  'THE','OF','AND','FOR','AT','IN','OR','AN','A',
+  'INC','LLC','LP','CORP','LTD','DBA',
+  'HEALTH','CARE','HEALTHCARE','MEDICAL','CENTER','CLINIC',
+  'HOSPITAL','SYSTEM','GROUP','NETWORK','PARTNERS','ASSOCIATES',
+  'SERVICES','INSTITUTE','FOUNDATION','TRUST','ALLIANCE',
+]);
+
+function normalizeOrgName(s: string): string {
+  return s.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function significantWords(orgName: string): string[] {
+  return normalizeOrgName(orgName).split(' ').filter(w => w.length > 2 && !ORG_SKIP_WORDS.has(w));
+}
+
 /** Search Physician Compare by organization name (LIKE match) — finds affiliated providers */
 export async function searchProvidersByOrg(
   orgName: string,
   limit = 100
 ): Promise<PhysicianCompareRecord[]> {
-  // Use first meaningful word for broader LIKE match (e.g. "STANFORD" from "STANFORD HEALTHCARE")
-  const keyword = orgName.trim().toUpperCase().split(/\s+/)[0];
+  const words = significantWords(orgName);
+  if (!words.length) return [];
+  const keyword = words[0]; // e.g. "STANFORD" from "STANFORD CHILDREN'S HOSPITAL"
+
   const params = new URLSearchParams();
   params.set('conditions[0][property]', 'org_nm');
   params.set('conditions[0][value]', keyword + '%');
@@ -250,10 +269,21 @@ export async function searchProvidersByOrg(
     const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
     if (!resp.ok) return [];
     const data = await resp.json();
-    // Filter client-side to ensure org name actually contains the full input keyword
     const results: PhysicianCompareRecord[] = data.results ?? [];
-    const needle = orgName.trim().toUpperCase().split(/\s+/).slice(0, 2).join(' ');
-    return results.filter(r => (r.org_nm ?? '').toUpperCase().includes(needle));
+    if (!results.length) return [];
+
+    // Client-side refinement: if more than one significant word exists,
+    // require org_nm to also contain at least one additional significant word
+    if (words.length > 1) {
+      const extra = words.slice(1);
+      const refined = results.filter(r => {
+        const norm = normalizeOrgName(r.org_nm ?? '');
+        return extra.some(w => norm.includes(w));
+      });
+      // Fall back to unrefined if filtering was too strict
+      return refined.length > 0 ? refined : results;
+    }
+    return results;
   } catch { return []; }
 }
 

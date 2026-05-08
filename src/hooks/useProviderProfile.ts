@@ -145,7 +145,7 @@ export function useProviderProfile(npi: string | null) {
           lastUpdated: nppesResult.basic.last_updated ?? '',
           medSchool: compareResult?.Med_sch ?? null,
           gradYear: compareResult?.Grd_yr ?? null,
-          organization: compareResult?.org_nm ?? null,
+          organization: compareResult?.org_nm || compareResult?.hosp_afl_lbn_1 || null,
           groupPracticeSize: compareResult?.num_org_mem ?? null,
           hospitalAffiliations: buildHospitalList(compareResult),
           payments: [],
