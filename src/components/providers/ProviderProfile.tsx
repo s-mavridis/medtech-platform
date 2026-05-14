@@ -39,7 +39,7 @@ function EmptyData({ message }: { message: string }) {
 
 // ── Procedure volumes table ────────────────────────────────────────────────────
 
-function ProcedureTable({ volumes }: { volumes: ProcedureVolumeSummary[] }) {
+function ProcedureTable({ volumes, onCptSearch }: { volumes: ProcedureVolumeSummary[]; onCptSearch?: (code: string) => void }) {
   if (!volumes.length) return <EmptyData message="No Medicare procedure volume data found for this NPI. This provider may not have sufficient Medicare claims in the 2022 PUF, or data is not yet indexed." />;
   return (
     <>
@@ -57,7 +57,15 @@ function ProcedureTable({ volumes }: { volumes: ProcedureVolumeSummary[] }) {
         <tbody>
           {volumes.slice(0, 20).map((v, i) => (
             <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-              <td className="py-2 font-mono text-blue-600 text-xs">{v.hcpcs}</td>
+              <td className="py-2 text-xs">
+                <button
+                  onClick={() => onCptSearch?.(v.hcpcs)}
+                  className="font-mono text-blue-600 hover:text-blue-800 hover:underline cursor-pointer bg-transparent border-none p-0"
+                >
+                  {v.hcpcs}
+                </button>
+                {v.year && <span className="ml-1.5 text-xs text-gray-300 font-mono">{v.year}</span>}
+              </td>
               <td className="py-2 text-gray-900 pr-4">{v.description}</td>
               <td className="py-2 text-right font-semibold text-gray-900">{v.totalServices.toLocaleString()}</td>
               <td className="py-2 text-right text-gray-600">{v.uniquePatients.toLocaleString()}</td>
@@ -150,9 +158,10 @@ interface ProviderProfileProps {
   setActiveView: (v: string) => void;
   previousView: string;
   onFacilitySearch?: (orgName: string) => void;
+  onCptSearch?: (code: string) => void;
 }
 
-export default function ProviderProfile({ npi, setActiveView, previousView, onFacilitySearch }: ProviderProfileProps) {
+export default function ProviderProfile({ npi, setActiveView, previousView, onFacilitySearch, onCptSearch }: ProviderProfileProps) {
   const { data, loading, loadingPayments, loadingProcedures, error, usingDemo } = useProviderProfile(npi);
 
   if (loading) {
@@ -282,7 +291,7 @@ export default function ProviderProfile({ npi, setActiveView, previousView, onFa
           subtitle="Medicare Physician & Other Practitioners PUF 2022 — CMS.gov"
           loading={loadingProcedures}
         >
-          <ProcedureTable volumes={data.procedureVolumes} />
+          <ProcedureTable volumes={data.procedureVolumes} onCptSearch={onCptSearch} />
         </Section>
 
         {/* Open Payments */}

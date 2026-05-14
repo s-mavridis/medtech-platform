@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, Map, AlertCircle, Users, Activity, DollarSign, TrendingUp } from 'lucide-react';
+import { Loader2, Map, AlertCircle, Users, Activity, DollarSign, TrendingUp, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { searchNppes } from '../../api/nppes';
 import { PUF_2023_ID } from '../../api/cms';
@@ -39,6 +39,26 @@ const SPECIALTIES = [
 const fmt$ = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const fmtN = (n: number) => n.toLocaleString();
 
+type SortDir = 'asc' | 'desc';
+interface SortState { key: string; dir: SortDir }
+
+function SortTh({ label, sortKey, sort, onSort }: {
+  label: string; sortKey: string; sort: SortState; onSort: (k: string) => void;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th onClick={() => onSort(sortKey)}
+      className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800 transition-colors">
+      <span className="inline-flex items-center gap-1 justify-end w-full">
+        {label}
+        {active
+          ? sort.dir === 'desc' ? <ArrowDown className="w-3 h-3 text-blue-500" /> : <ArrowUp className="w-3 h-3 text-blue-500" />
+          : <ArrowUpDown className="w-3 h-3 text-gray-300" />}
+      </span>
+    </th>
+  );
+}
+
 interface TerritoryData {
   state: string;
   specialtyCounts: { label: string; count: number; color: string }[];
@@ -52,8 +72,8 @@ async function fetchTerritoryData(stateAbbr: string): Promise<TerritoryData> {
   // 1. Provider counts by specialty from NPPES (parallel, limit=1 just to get result_count)
   const specialtyResults = await Promise.allSettled(
     SPECIALTIES.map(s =>
-      searchNppes({ taxonomy_description: s.tax, state: stateAbbr, enumeration_type: 'NPI-1', limit: 1 })
-        .then(r => ({ label: s.label, count: r.result_count ?? 0, color: s.color }))
+      searchNppes({ taxonomy_description: s.tax, state: stateAbbr, enumeration_type: 'NPI-1', limit: 5 })
+        .then(r => ({ label: s.label, count: r.result_count ?? r.results?.length ?? 0, color: s.color }))
     )
   );
   const specialtyCounts = specialtyResults
@@ -86,11 +106,18 @@ async function fetchTerritoryData(stateAbbr: string): Promise<TerritoryData> {
   return { state: stateAbbr, specialtyCounts, totalProviders, topProcedures, totalServices, totalRevenue };
 }
 
-export default function TerritoryAnalytics() {
+interface TerritoryAnalyticsProps {
+  onCptSearch?: (code: string) => void;
+}
+
+export default function TerritoryAnalytics({ onCptSearch }: TerritoryAnalyticsProps) {
   const [selectedState, setSelectedState] = useState('CA');
   const [data, setData] = useState<TerritoryData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [procSort, setProcSort] = useState<SortState>({ key: 'services', dir: 'desc' });
+
+  const toggleProcSort = (k: string) => setProcSort(s => s.key === k ? { ...s, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key: k, dir: 'desc' });
 
   const load = useCallback(async (state: string) => {
     setLoading(true); setError(null); setData(null);
@@ -225,14 +252,25 @@ export default function TerritoryAnalytics() {
                   <tr>
                     <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">HCPCS</th>
                     <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Procedure</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Services</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Est. Revenue</th>
+                    <SortTh label="Services" sortKey="services" sort={procSort} onSort={toggleProcSort} />
+                    <SortTh label="Est. Revenue" sortKey="revenue" sort={procSort} onSort={toggleProcSort} />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 bg-white">
-                  {data.topProcedures.slice(0, 15).map((p, i) => (
+                  {[...data.topProcedures].sort((a, b) =>
+                    procSort.dir === 'desc'
+                      ? (b[procSort.key as 'services' | 'revenue'] - a[procSort.key as 'services' | 'revenue'])
+                      : (a[procSort.key as 'services' | 'revenue'] - b[procSort.key as 'services' | 'revenue'])
+                  ).slice(0, 15).map((p, i) => (
                     <tr key={p.hcpcs + i} className="hover:bg-gray-50">
-                      <td className="px-4 py-2.5 font-mono text-xs font-semibold text-blue-700">{p.hcpcs}</td>
+                      <td className="px-4 py-2.5">
+                        <button
+                          onClick={() => onCptSearch?.(p.hcpcs)}
+                          className={`font-mono text-xs font-semibold ${onCptSearch ? 'text-blue-600 hover:text-blue-800 hover:underline cursor-pointer' : 'text-blue-700'}`}
+                        >
+                          {p.hcpcs}
+                        </button>
+                      </td>
                       <td className="px-4 py-2.5 text-gray-700 max-w-sm truncate">{p.desc}</td>
                       <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmtN(p.services)}</td>
                       <td className="px-4 py-2.5 text-right font-medium text-green-700">{fmt$(p.revenue)}</td>

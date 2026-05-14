@@ -59,6 +59,7 @@ export interface ProcedureVolumeSummary {
   avgPaymentAmt: number;
   avgSubmittedCharge: number;
   placeOfService: 'Facility' | 'Office' | 'Mixed';
+  year?: string;
 }
 
 export interface CptProviderRow {
@@ -119,13 +120,13 @@ function parseRow(r: PhysicianPufRecord): CptProviderRow {
 
 /** Query Medicare PUF by NPI — returns all procedures billed by that provider */
 export async function getProcedureVolumesByNpi(npi: string): Promise<ProcedureVolumeSummary[]> {
-  for (const id of [PUF_2023_ID, PUF_2022_ID]) {
+  async function fetchYear(id: string, year: string): Promise<ProcedureVolumeSummary[]> {
     try {
       const params = new URLSearchParams({ 'filter[Rndrng_NPI]': npi, size: '100' });
       const resp = await fetch(`${BASE}/${id}/data?${params}`, { signal: AbortSignal.timeout(10000) });
-      if (!resp.ok) continue;
+      if (!resp.ok) return [];
       const rows: PhysicianPufRecord[] = await resp.json();
-      if (!rows.length || !('HCPCS_Cd' in rows[0])) continue;
+      if (!rows.length || !('HCPCS_Cd' in rows[0])) return [];
       return rows.map(r => ({
         hcpcs: r.HCPCS_Cd,
         description: r.HCPCS_Desc,
@@ -135,10 +136,15 @@ export async function getProcedureVolumesByNpi(npi: string): Promise<ProcedureVo
         avgPaymentAmt: parseFloat(r.Avg_Mdcr_Pymt_Amt) || 0,
         avgSubmittedCharge: parseFloat(r.Avg_Sbmtd_Chrg) || 0,
         placeOfService: (r.Place_Of_Srvc === 'F' ? 'Facility' : r.Place_Of_Srvc === 'O' ? 'Office' : 'Mixed') as 'Facility' | 'Office' | 'Mixed',
-      })).sort((a, b) => b.totalServices - a.totalServices);
-    } catch { continue; }
+        year,
+      }));
+    } catch { return []; }
   }
-  return [];
+  const [rows2023, rows2022] = await Promise.all([
+    fetchYear(PUF_2023_ID, '2023'),
+    fetchYear(PUF_2022_ID, '2022'),
+  ]);
+  return [...rows2023, ...rows2022].sort((a, b) => b.totalServices - a.totalServices);
 }
 
 /** Query Medicare PUF by HCPCS/CPT code — returns all providers billing that code */

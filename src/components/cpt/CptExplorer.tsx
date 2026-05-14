@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Search, Loader2, AlertCircle, TrendingUp, Users, Activity, DollarSign,
   Building2, MapPin, ChevronRight, X, ArrowLeft, ArrowUp, ArrowDown, ArrowUpDown,
 } from 'lucide-react';
-import { ComposableMap, Geographies, Geography } from 'react-simple-maps';
+import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
 import { Tooltip } from 'react-tooltip';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { useCptExplorer } from '../../hooks/useCptExplorer';
@@ -89,6 +89,20 @@ function getColor(value: number, max: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
+const STATE_CENTROIDS: Record<string, [number, number]> = {
+  AL:[-86.8,32.8],AK:[-153.4,64.2],AZ:[-111.7,34.3],AR:[-92.4,34.9],CA:[-119.5,37.3],
+  CO:[-105.5,38.9],CT:[-72.7,41.6],DE:[-75.5,38.9],FL:[-81.5,27.8],GA:[-83.4,32.7],
+  HI:[-157.8,20.1],ID:[-114.2,44.4],IL:[-89.2,40.0],IN:[-86.3,40.0],IA:[-93.4,42.1],
+  KS:[-98.4,38.5],KY:[-84.9,37.5],LA:[-92.4,31.0],ME:[-69.2,45.4],MD:[-76.8,39.0],
+  MA:[-71.5,42.3],MI:[-84.7,44.3],MN:[-94.3,46.4],MS:[-89.7,32.5],MO:[-92.5,38.3],
+  MT:[-110.5,47.0],NE:[-99.9,41.5],NV:[-116.7,39.5],NH:[-71.5,44.0],NJ:[-74.5,40.1],
+  NM:[-106.1,34.4],NY:[-75.5,43.0],NC:[-79.4,35.6],ND:[-100.5,47.4],OH:[-82.8,40.4],
+  OK:[-97.5,35.6],OR:[-120.5,44.0],PA:[-77.2,40.9],RI:[-71.5,41.7],SC:[-80.9,33.8],
+  SD:[-100.4,44.4],TN:[-86.7,35.9],TX:[-99.3,31.5],UT:[-111.1,39.3],VT:[-72.7,44.0],
+  VA:[-78.5,37.8],WA:[-120.5,47.4],WV:[-80.6,38.6],WI:[-89.8,44.7],WY:[-107.6,43.0],
+  DC:[-77.0,38.9],
+};
+
 function UsMap({ stateAggregates, onStateClick }: {
   stateAggregates: StateAggregate[];
   onStateClick: (abbr: string) => void;
@@ -129,6 +143,16 @@ function UsMap({ stateAggregates, onStateClick }: {
             })
           }
         </Geographies>
+        {Object.entries(STATE_CENTROIDS).map(([abbr, coords]) => (
+          <Marker key={abbr} coordinates={coords}>
+            <text
+              textAnchor="middle"
+              style={{ fontFamily: 'sans-serif', fontSize: 7, fontWeight: 600, fill: '#374151', pointerEvents: 'none', userSelect: 'none' }}
+            >
+              {abbr}
+            </text>
+          </Marker>
+        ))}
       </ComposableMap>
       <Tooltip id="map-tooltip" content={tooltipContent} />
       <div className="flex items-center gap-2 mt-1 text-xs text-gray-500">
@@ -157,9 +181,18 @@ function StatePanel({
   const [provSort, toggleProv] = useSort('totalServices');
   const [instSort, toggleInst] = useSort('totalServices');
   const [tab, setTab] = useState<'providers' | 'institutions'>('providers');
+  const [provFilter, setProvFilter] = useState('');
+  const [instFilter, setInstFilter] = useState('');
 
   const stateRows = rawRows.filter(r => r.state === abbr);
-  const sortedProviders = applySortNum(stateRows, provSort, (r, k) => {
+  const filteredProviders = provFilter
+    ? stateRows.filter(p =>
+        p.displayName.toLowerCase().includes(provFilter.toLowerCase()) ||
+        p.specialty.toLowerCase().includes(provFilter.toLowerCase()) ||
+        p.city.toLowerCase().includes(provFilter.toLowerCase())
+      )
+    : stateRows;
+  const sortedProviders = applySortNum(filteredProviders, provSort, (r, k) => {
     if (k === 'totalServices') return r.totalServices;
     if (k === 'uniquePatients') return r.uniquePatients;
     if (k === 'avgAllowedAmt') return r.avgAllowedAmt;
@@ -168,7 +201,13 @@ function StatePanel({
   });
 
   const stateInstitutions = allInstitutions.filter(i => i.state === abbr);
-  const sortedInstitutions = applySortNum(stateInstitutions, instSort, (r, k) => {
+  const filteredInstitutions = instFilter
+    ? stateInstitutions.filter(i =>
+        i.orgName.toLowerCase().includes(instFilter.toLowerCase()) ||
+        i.city.toLowerCase().includes(instFilter.toLowerCase())
+      )
+    : stateInstitutions;
+  const sortedInstitutions = applySortNum(filteredInstitutions, instSort, (r, k) => {
     if (k === 'totalServices') return r.totalServices;
     if (k === 'providerCount') return r.providerCount;
     if (k === 'avgAllowedAmt') return r.avgAllowedAmt;
@@ -213,6 +252,15 @@ function StatePanel({
       <div className="flex-1 overflow-auto p-4">
         {tab === 'providers' && (
           <div className="card overflow-hidden p-0">
+            <div className="p-3 border-b border-gray-100">
+              <input
+                type="text"
+                placeholder="Filter by name, specialty, city…"
+                value={provFilter}
+                onChange={e => setProvFilter(e.target.value)}
+                className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                 <tr>
@@ -233,6 +281,7 @@ function StatePanel({
                     <td className="px-4 py-2.5 text-gray-400 text-xs">{i + 1}</td>
                     <td className="px-4 py-2.5">
                       <div className="font-medium text-gray-900 group-hover:text-blue-700">{p.displayName}</div>
+                      {p.orgName && <div className="text-xs text-purple-600">{p.orgName}</div>}
                       <div className="text-xs text-gray-400 font-mono">NPI {p.npi}</div>
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[140px] truncate">{p.specialty}</td>
@@ -252,6 +301,15 @@ function StatePanel({
 
         {tab === 'institutions' && (
           <div className="card overflow-hidden p-0">
+            <div className="p-3 border-b border-gray-100">
+              <input
+                type="text"
+                placeholder="Filter by name, specialty, city…"
+                value={instFilter}
+                onChange={e => setInstFilter(e.target.value)}
+                className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                 <tr>
@@ -292,9 +350,11 @@ type TabId = 'map' | 'providers' | 'institutions';
 interface CptExplorerProps {
   setActiveView: (v: string) => void;
   setSelectedNpi: (npi: string) => void;
+  initialCode?: string;
+  onCodeUsed?: () => void;
 }
 
-export default function CptExplorer({ setActiveView, setSelectedNpi }: CptExplorerProps) {
+export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode, onCodeUsed }: CptExplorerProps) {
   const [input, setInput] = useState('');
   const [year, setYear] = useState<'2023' | '2022'>('2023');
   const [tab, setTab] = useState<TabId>('map');
@@ -307,6 +367,16 @@ export default function CptExplorer({ setActiveView, setSelectedNpi }: CptExplor
     const q = (code ?? input).trim().toUpperCase();
     if (q) { setInput(q); setSelectedState(null); search(q, year); }
   };
+
+  useEffect(() => {
+    if (initialCode && initialCode.trim()) {
+      const q = initialCode.trim().toUpperCase();
+      setInput(q);
+      setSelectedState(null);
+      search(q, year);
+      onCodeUsed?.();
+    }
+  }, [initialCode]);
 
   const handleProviderClick = (npi: string) => { setSelectedNpi(npi); setActiveView('profile'); };
 
