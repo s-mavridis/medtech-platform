@@ -25,7 +25,7 @@ export default function Sidebar({ activeView, setActiveView }: SidebarProps) {
           <Activity className="w-4 h-4 text-white" />
         </div>
         <div>
-          <div className="font-bold text-gray-900 text-sm leading-tight">MedScout</div>
+          <div className="font-bold text-gray-900 text-sm leading-tight">Prism</div>
           <div className="text-xs text-gray-400 leading-tight">Commercial Intelligence</div>
         </div>
       </div>

@@ -13,7 +13,7 @@ const viewTitles: Record<string, { title: string; subtitle: string }> = {
 };
 
 export default function Header({ activeView }: { activeView: string }) {
-  const info = viewTitles[activeView] ?? { title: 'MedScout', subtitle: '' };
+  const info = viewTitles[activeView] ?? { title: 'Prism', subtitle: '' };
   return (
     <header className="h-14 bg-white border-b border-gray-200 flex items-center px-6 gap-4 flex-shrink-0">
       <div className="flex-1 min-w-0">
