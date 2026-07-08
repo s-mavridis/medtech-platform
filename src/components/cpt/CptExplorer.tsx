@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Search, Loader2, AlertCircle, TrendingUp, Users, Activity, DollarSign,
-  Building2, MapPin, ChevronRight, X, ArrowLeft, ArrowUp, ArrowDown, ArrowUpDown,
+  Building2, MapPin, ChevronRight, X, ArrowLeft, ArrowUp, ArrowDown, ArrowUpDown, Download,
 } from 'lucide-react';
 import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
 import { Tooltip } from 'react-tooltip';
@@ -9,6 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 import { useCptExplorer } from '../../hooks/useCptExplorer';
 import type { StateAggregate, InstitutionAggregate } from '../../hooks/useCptExplorer';
 import type { CptProviderRow } from '../../api/cms';
+import { resolveProviderFacilities } from '../../api/facilityMatch';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json';
 
@@ -57,6 +58,52 @@ function useSort(defaultKey: string): [SortState, (k: string) => void] {
 
 function applySortNum<T>(arr: T[], sort: SortState, getter: (r: T, k: string) => number): T[] {
   return [...arr].sort((a, b) => sort.dir === 'desc' ? getter(b, sort.key) - getter(a, sort.key) : getter(a, sort.key) - getter(b, sort.key));
+}
+
+// ─── Facility/system matching (address-based inference for individual billers) ─
+function useFacilityMatch(rows: CptProviderRow[]): [Map<string, string>, boolean] {
+  const [map, setMap] = useState<Map<string, string>>(new Map());
+  const [loading, setLoading] = useState(false);
+  // Key on NPI list content, not array reference — callers often pass a fresh
+  // `[]` literal (e.g. `summary?.topProviders ?? []`) on every render.
+  const key = rows.map(r => r.npi).join(',');
+
+  useEffect(() => {
+    if (!rows.length) { setMap(new Map()); return; }
+    let cancelled = false;
+    setLoading(true);
+    resolveProviderFacilities(rows).then(m => {
+      if (!cancelled) { setMap(m); setLoading(false); }
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return [map, loading];
+}
+
+// ─── CSV export ────────────────────────────────────────────────────────────────
+function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: string | number) => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers, ...rows].map(row => row.map(escape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function ExportCsvButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick}
+      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors flex-shrink-0">
+      <Download className="w-3.5 h-3.5" /> Export CSV
+    </button>
+  );
 }
 
 // ─── Map ──────────────────────────────────────────────────────────────────────
@@ -184,7 +231,8 @@ function StatePanel({
   const [provFilter, setProvFilter] = useState('');
   const [instFilter, setInstFilter] = useState('');
 
-  const stateRows = rawRows.filter(r => r.state === abbr);
+  const stateRows = useMemo(() => rawRows.filter(r => r.state === abbr), [rawRows, abbr]);
+  const [facilityMap, facilityLoading] = useFacilityMatch(stateRows);
   const filteredProviders = provFilter
     ? stateRows.filter(p =>
         p.displayName.toLowerCase().includes(provFilter.toLowerCase()) ||
@@ -252,20 +300,26 @@ function StatePanel({
       <div className="flex-1 overflow-auto p-4">
         {tab === 'providers' && (
           <div className="card overflow-hidden p-0">
-            <div className="p-3 border-b border-gray-100">
+            <div className="p-3 border-b border-gray-100 flex items-center gap-2">
               <input
                 type="text"
                 placeholder="Filter by name, specialty, city…"
                 value={provFilter}
                 onChange={e => setProvFilter(e.target.value)}
-                className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
+              <ExportCsvButton onClick={() => exportCsv(
+                `${abbr}-${hcpcs}-providers.csv`,
+                ['#', 'Provider', 'NPI', 'Facility/System', 'Specialty', 'City', 'State', 'Services', 'Patients', 'Avg Allowed', 'Avg Paid'],
+                sortedProviders.map((p, i) => [i + 1, p.displayName, p.npi, facilityMap.get(p.npi) ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
+              )} />
             </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                 <tr>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase w-6">#</th>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Provider</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Facility / System</th>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Specialty</th>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">City</th>
                   <SortTh label="Services" sortKey="totalServices" sort={provSort} onSort={toggleProv} />
@@ -284,6 +338,9 @@ function StatePanel({
                       {p.orgName && <div className="text-xs text-purple-600">{p.orgName}</div>}
                       <div className="text-xs text-gray-400 font-mono">NPI {p.npi}</div>
                     </td>
+                    <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[160px] truncate">
+                      {p.entityType === 'O' ? <span className="text-gray-300">—</span> : facilityMap.get(p.npi) ?? (facilityLoading ? <span className="text-gray-300 italic">matching…</span> : <span className="text-gray-300">—</span>)}
+                    </td>
                     <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[140px] truncate">{p.specialty}</td>
                     <td className="px-4 py-2.5 text-xs text-gray-500">{p.city}</td>
                     <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmtN(p.totalServices)}</td>
@@ -296,19 +353,25 @@ function StatePanel({
               </tbody>
             </table>
             {stateRows.length === 0 && <div className="p-8 text-center text-sm text-gray-400">No individual provider data for this state in the current sample.</div>}
+            <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">Facility/System is inferred by matching each provider's practice address against registered organizations in NPPES — best-effort, not authoritative.</div>
           </div>
         )}
 
         {tab === 'institutions' && (
           <div className="card overflow-hidden p-0">
-            <div className="p-3 border-b border-gray-100">
+            <div className="p-3 border-b border-gray-100 flex items-center gap-2">
               <input
                 type="text"
                 placeholder="Filter by name, specialty, city…"
                 value={instFilter}
                 onChange={e => setInstFilter(e.target.value)}
-                className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
+              <ExportCsvButton onClick={() => exportCsv(
+                `${abbr}-${hcpcs}-institutions.csv`,
+                ['#', 'Institution', 'City', 'State', 'Providers', 'Services', 'Avg Allowed', 'Est. Revenue'],
+                sortedInstitutions.map((inst, i) => [i + 1, inst.orgName, inst.city, inst.state, inst.providerCount, inst.totalServices, inst.avgAllowedAmt.toFixed(2), inst.totalRevenue.toFixed(2)])
+              )} />
             </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
@@ -379,6 +442,8 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
   }, [initialCode]);
 
   const handleProviderClick = (npi: string) => { setSelectedNpi(npi); setActiveView('profile'); };
+
+  const [facilityMap, facilityLoading] = useFacilityMatch(summary?.topProviders ?? []);
 
   const sortedProviders = applySortNum(summary?.topProviders ?? [], provSort, (r, k) => {
     if (k === 'totalServices') return r.totalServices;
@@ -550,11 +615,19 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
           {tab === 'providers' && (
             <div className="p-4">
               <div className="card overflow-hidden p-0">
+                <div className="p-3 border-b border-gray-100 flex items-center justify-end">
+                  <ExportCsvButton onClick={() => exportCsv(
+                    `${summary.hcpcs}-top-providers.csv`,
+                    ['#', 'Provider', 'NPI', 'Facility/System', 'Specialty', 'City', 'State', 'Services', 'Patients', 'Avg Allowed', 'Avg Paid'],
+                    sortedProviders.map((p, i) => [i + 1, p.displayName, p.npi, facilityMap.get(p.npi) ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
+                  )} />
+                </div>
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                     <tr>
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase w-8">#</th>
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Provider</th>
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Facility / System</th>
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Specialty</th>
                       <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Location</th>
                       <SortTh label="Services" sortKey="totalServices" sort={provSort} onSort={toggleProv} />
@@ -569,6 +642,9 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
                       <tr key={`${p.npi}-${i}`} className="hover:bg-blue-50/40 cursor-pointer group" onClick={() => handleProviderClick(p.npi)}>
                         <td className="px-4 py-2.5 text-gray-400 text-xs">{i + 1}</td>
                         <td className="px-4 py-2.5"><div className="font-medium text-gray-900 group-hover:text-blue-700">{p.displayName}</div><div className="text-xs text-gray-400 font-mono">NPI {p.npi}</div></td>
+                        <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[160px] truncate">
+                          {p.entityType === 'O' ? <span className="text-gray-300">—</span> : facilityMap.get(p.npi) ?? (facilityLoading ? <span className="text-gray-300 italic">matching…</span> : <span className="text-gray-300">—</span>)}
+                        </td>
                         <td className="px-4 py-2.5 text-gray-600 text-xs max-w-[160px] truncate">{p.specialty}</td>
                         <td className="px-4 py-2.5"><div className="flex items-center gap-1 text-xs text-gray-600"><MapPin className="w-3 h-3 text-gray-400" />{p.city}, {p.state}</div></td>
                         <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmtN(p.totalServices)}</td>
@@ -580,6 +656,7 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
                     ))}
                   </tbody>
                 </table>
+                <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">Facility/System is inferred by matching each provider's practice address against registered organizations in NPPES — best-effort, not authoritative.</div>
               </div>
             </div>
           )}
@@ -604,6 +681,13 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
                     </ResponsiveContainer>
                   </div>
                   <div className="card overflow-hidden p-0">
+                    <div className="p-3 border-b border-gray-100 flex items-center justify-end">
+                      <ExportCsvButton onClick={() => exportCsv(
+                        `${summary.hcpcs}-top-institutions.csv`,
+                        ['#', 'Institution', 'City', 'State', 'Providers', 'Services', 'Avg Allowed', 'Est. Revenue'],
+                        sortedInstitutions.map((inst, i) => [i + 1, inst.orgName, inst.city, inst.state, inst.providerCount, inst.totalServices, inst.avgAllowedAmt.toFixed(2), inst.totalRevenue.toFixed(2)])
+                      )} />
+                    </div>
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                         <tr>

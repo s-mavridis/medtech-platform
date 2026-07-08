@@ -71,6 +71,7 @@ export interface CptProviderRow {
   orgName: string;
   entityType: string;
   specialty: string;
+  street: string;
   city: string;
   state: string;
   stateFips: string;
@@ -103,6 +104,7 @@ function parseRow(r: PhysicianPufRecord): CptProviderRow {
     orgName: isOrg ? lastName : '',
     entityType: r.Rndrng_Prvdr_Ent_Cd,
     specialty: r.Rndrng_Prvdr_Type ?? '',
+    street: r.Rndrng_Prvdr_St1 ?? '',
     city: r.Rndrng_Prvdr_City ?? '',
     state,
     stateFips: r.Rndrng_Prvdr_State_FIPS ?? STATE_FIPS[state] ?? '',

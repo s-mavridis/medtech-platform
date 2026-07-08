@@ -67,6 +67,7 @@ export interface NppesSearchParams {
   first_name?: string;
   last_name?: string;
   taxonomy_description?: string;
+  address_1?: string;
   city?: string;
   state?: string;
   postal_code?: string;
@@ -85,6 +86,7 @@ export async function searchNppes(params: NppesSearchParams): Promise<NppesRespo
   if (params.first_name) p['first_name'] = wc(params.first_name);
   if (params.last_name) p['last_name'] = wc(params.last_name);
   if (params.taxonomy_description) p['taxonomy_description'] = params.taxonomy_description; // exact match for taxonomy
+  if (params.address_1) p['address_1'] = params.address_1.trim();
   if (params.city) p['city'] = params.city;
   if (params.state) p['state'] = params.state;
   if (params.postal_code) p['postal_code'] = params.postal_code;
