@@ -272,7 +272,7 @@ export async function searchProvidersByOrg(
   // Try each keyword (most distinctive first) until we get a refined match
   for (const keyword of sortedWords.slice(0, 3)) {
     const params = new URLSearchParams();
-    params.set('conditions[0][property]', 'org_nm');
+    params.set('conditions[0][property]', 'facility_name');
     // Use %keyword% (contains) so "BRIGHAM" matches "BRIGHAM AND WOMEN'S HOSPITAL"
     // and "GENERAL" matches "MASSACHUSETTS GENERAL HOSPITAL"
     params.set('conditions[0][value]', '%' + keyword + '%');
@@ -290,12 +290,12 @@ export async function searchProvidersByOrg(
       const otherWords = words.filter(w => w !== keyword);
       if (!otherWords.length) return results;
 
-      // Require org_nm to contain at least one other significant word from the search org name
-      // e.g. for MGB: %BRIGHAM% results refined to those also containing "MASS" or "GENERAL"
-      //   → "BRIGHAM AND WOMEN'S..." filtered out; "MASS GENERAL BRIGHAM" kept
-      //   → "MASSACHUSETTS GENERAL HOSPITAL" also kept (MASS substring matches "MASS")
+      // Require facility_name to contain at least one other significant word from the
+      // search org name, e.g. for MGB: %BRIGHAM% results refined to those also containing
+      // "MASS" or "GENERAL" → "BRIGHAM AND WOMEN'S..." filtered out; "MASS GENERAL BRIGHAM"
+      // kept; "MASSACHUSETTS GENERAL HOSPITAL" also kept (MASS substring matches "MASS")
       const refined = results.filter(r => {
-        const norm = normalizeOrgName(r.org_nm ?? '');
+        const norm = normalizeOrgName(r.facility_name ?? '');
         return otherWords.some(w => norm.includes(w));
       });
 
@@ -316,11 +316,11 @@ export async function getPhysicianCompareByName(
   if (!lastName) return null;
   try {
     const params = new URLSearchParams();
-    params.set('conditions[0][property]', 'lst_nm');
+    params.set('conditions[0][property]', 'provider_last_name');
     params.set('conditions[0][value]', lastName.toUpperCase());
     params.set('conditions[0][operator]', '=');
     if (state) {
-      params.set('conditions[1][property]', 'st');
+      params.set('conditions[1][property]', 'state');
       params.set('conditions[1][value]', state.toUpperCase());
       params.set('conditions[1][operator]', '=');
     }
@@ -333,7 +333,7 @@ export async function getPhysicianCompareByName(
     if (!results.length) return null;
     // Find best match by first name prefix (handle middle name in first name slot)
     const firstUp = firstName.toUpperCase().slice(0, 3);
-    const match = results.find(r => r.frst_nm?.toUpperCase().startsWith(firstUp));
+    const match = results.find(r => r.provider_first_name?.toUpperCase().startsWith(firstUp));
     return match ?? results[0];
   } catch { return null; }
 }
@@ -342,44 +342,43 @@ export async function getPhysicianCompareByName(
 const PHYSICIAN_COMPARE_ID = 'mj5m-pzi6';
 const PROVIDER_DATA_BASE = '/api/cms-provider';
 
+// Field names match the CMS "Physicians & Clinicians" dataset (mj5m-pzi6) as
+// actually returned by data.cms.gov today — all lowercase, snake_case. CMS
+// renamed/restructured this dataset at some point (it used to expose org_nm,
+// lst_nm/frst_nm, cty/st/zip, and hosp_afl_lbn_1..5 hospital-affiliation
+// fields); those no longer exist in the live response and reading them
+// silently returns undefined. There is currently no hospital-affiliation
+// field in this dataset at all — facility_name is the closest available
+// group-practice/facility signal.
 export interface PhysicianCompareRecord {
-  NPI: string;
-  Ind_PAC_ID: string;
-  Ind_enrl_ID: string;
-  lst_nm: string;
-  frst_nm: string;
-  mid_nm: string;
+  npi: string;
+  ind_pac_id: string;
+  ind_enrl_id: string;
+  provider_last_name: string;
+  provider_first_name: string;
+  provider_middle_name: string;
   suff: string;
   gndr: string;
-  Cred: string;
-  Med_sch: string;
-  Grd_yr: string;
+  cred: string;
+  med_sch: string;
+  grd_yr: string;
   pri_spec: string;
   sec_spec_1: string;
   sec_spec_2: string;
   sec_spec_3: string;
   sec_spec_4: string;
   sec_spec_all: string;
-  org_nm: string;
+  telehlth: string;
+  facility_name: string;
   org_pac_id: string;
   num_org_mem: string;
   adr_ln_1: string;
   adr_ln_2: string;
   ln_2_sprs: string;
-  cty: string;
-  st: string;
-  zip: string;
-  phn_numbr: string;
-  hosp_afl_1: string;
-  hosp_afl_lbn_1: string;
-  hosp_afl_2: string;
-  hosp_afl_lbn_2: string;
-  hosp_afl_3: string;
-  hosp_afl_lbn_3: string;
-  hosp_afl_4: string;
-  hosp_afl_lbn_4: string;
-  hosp_afl_5: string;
-  hosp_afl_lbn_5: string;
+  citytown: string;
+  state: string;
+  zip_code: string;
+  telephone_number: string;
   ind_assgn: string;
   grp_assgn: string;
   adrs_id: string;

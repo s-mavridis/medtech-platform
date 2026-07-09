@@ -10,6 +10,7 @@ import { useCptExplorer } from '../../hooks/useCptExplorer';
 import type { StateAggregate, InstitutionAggregate } from '../../hooks/useCptExplorer';
 import type { CptProviderRow } from '../../api/cms';
 import { resolveProviderFacilities } from '../../api/facilityMatch';
+import type { FacilityMatch } from '../../api/facilityMatch';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json';
 
@@ -60,9 +61,9 @@ function applySortNum<T>(arr: T[], sort: SortState, getter: (r: T, k: string) =>
   return [...arr].sort((a, b) => sort.dir === 'desc' ? getter(b, sort.key) - getter(a, sort.key) : getter(a, sort.key) - getter(b, sort.key));
 }
 
-// ─── Facility/system matching (address-based inference for individual billers) ─
-function useFacilityMatch(rows: CptProviderRow[]): [Map<string, string>, boolean] {
-  const [map, setMap] = useState<Map<string, string>>(new Map());
+// ─── Facility/system matching (Physician Compare + address inference) ─────────
+function useFacilityMatch(rows: CptProviderRow[]): [Map<string, FacilityMatch>, boolean] {
+  const [map, setMap] = useState<Map<string, FacilityMatch>>(new Map());
   const [loading, setLoading] = useState(false);
   // Key on NPI list content, not array reference — callers often pass a fresh
   // `[]` literal (e.g. `summary?.topProviders ?? []`) on every render.
@@ -72,7 +73,9 @@ function useFacilityMatch(rows: CptProviderRow[]): [Map<string, string>, boolean
     if (!rows.length) { setMap(new Map()); return; }
     let cancelled = false;
     setLoading(true);
-    resolveProviderFacilities(rows).then(m => {
+    resolveProviderFacilities(rows, {
+      onUpdate: partial => { if (!cancelled) setMap(partial); },
+    }).then(m => {
       if (!cancelled) { setMap(m); setLoading(false); }
     });
     return () => { cancelled = true; };
@@ -80,6 +83,16 @@ function useFacilityMatch(rows: CptProviderRow[]): [Map<string, string>, boolean
   }, [key]);
 
   return [map, loading];
+}
+
+function FacilityCell({ entityType, match, loading }: {
+  entityType: string; match: FacilityMatch | undefined; loading: boolean;
+}) {
+  if (entityType === 'O') return <span className="text-gray-300">—</span>;
+  if (!match) return loading ? <span className="text-gray-300 italic">matching…</span> : <span className="text-gray-300">—</span>;
+  if (match.source === 'solo') return <span className="text-gray-400 italic">{match.name}</span>;
+  if (match.source === 'shared') return <span className="text-purple-400 italic">{match.name}</span>;
+  return <span className="text-gray-700">{match.name}</span>;
 }
 
 // ─── CSV export ────────────────────────────────────────────────────────────────
@@ -311,7 +324,7 @@ function StatePanel({
               <ExportCsvButton onClick={() => exportCsv(
                 `${abbr}-${hcpcs}-providers.csv`,
                 ['#', 'Provider', 'NPI', 'Facility/System', 'Specialty', 'City', 'State', 'Services', 'Patients', 'Avg Allowed', 'Avg Paid'],
-                sortedProviders.map((p, i) => [i + 1, p.displayName, p.npi, facilityMap.get(p.npi) ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
+                sortedProviders.map((p, i) => [i + 1, p.displayName, p.npi, facilityMap.get(p.npi)?.name ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
               )} />
             </div>
             <table className="w-full text-sm">
@@ -338,8 +351,8 @@ function StatePanel({
                       {p.orgName && <div className="text-xs text-purple-600">{p.orgName}</div>}
                       <div className="text-xs text-gray-400 font-mono">NPI {p.npi}</div>
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[160px] truncate">
-                      {p.entityType === 'O' ? <span className="text-gray-300">—</span> : facilityMap.get(p.npi) ?? (facilityLoading ? <span className="text-gray-300 italic">matching…</span> : <span className="text-gray-300">—</span>)}
+                    <td className="px-4 py-2.5 text-xs max-w-[160px] truncate">
+                      <FacilityCell entityType={p.entityType} match={facilityMap.get(p.npi)} loading={facilityLoading} />
                     </td>
                     <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[140px] truncate">{p.specialty}</td>
                     <td className="px-4 py-2.5 text-xs text-gray-500">{p.city}</td>
@@ -353,7 +366,7 @@ function StatePanel({
               </tbody>
             </table>
             {stateRows.length === 0 && <div className="p-8 text-center text-sm text-gray-400">No individual provider data for this state in the current sample.</div>}
-            <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">Facility/System is inferred by matching each provider's practice address against registered organizations in NPPES — best-effort, not authoritative.</div>
+            <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">Facility/System resolves in order: CMS Physician Compare affiliation (by NPI) → practice-address match against NPPES organizations → shared-address grouping among providers in this list → labeled independent/solo if no tie is found. Not authoritative for the address and grouping tiers.</div>
           </div>
         )}
 
@@ -619,7 +632,7 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
                   <ExportCsvButton onClick={() => exportCsv(
                     `${summary.hcpcs}-top-providers.csv`,
                     ['#', 'Provider', 'NPI', 'Facility/System', 'Specialty', 'City', 'State', 'Services', 'Patients', 'Avg Allowed', 'Avg Paid'],
-                    sortedProviders.map((p, i) => [i + 1, p.displayName, p.npi, facilityMap.get(p.npi) ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
+                    sortedProviders.map((p, i) => [i + 1, p.displayName, p.npi, facilityMap.get(p.npi)?.name ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
                   )} />
                 </div>
                 <table className="w-full text-sm">
@@ -642,8 +655,8 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
                       <tr key={`${p.npi}-${i}`} className="hover:bg-blue-50/40 cursor-pointer group" onClick={() => handleProviderClick(p.npi)}>
                         <td className="px-4 py-2.5 text-gray-400 text-xs">{i + 1}</td>
                         <td className="px-4 py-2.5"><div className="font-medium text-gray-900 group-hover:text-blue-700">{p.displayName}</div><div className="text-xs text-gray-400 font-mono">NPI {p.npi}</div></td>
-                        <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[160px] truncate">
-                          {p.entityType === 'O' ? <span className="text-gray-300">—</span> : facilityMap.get(p.npi) ?? (facilityLoading ? <span className="text-gray-300 italic">matching…</span> : <span className="text-gray-300">—</span>)}
+                        <td className="px-4 py-2.5 text-xs max-w-[160px] truncate">
+                          <FacilityCell entityType={p.entityType} match={facilityMap.get(p.npi)} loading={facilityLoading} />
                         </td>
                         <td className="px-4 py-2.5 text-gray-600 text-xs max-w-[160px] truncate">{p.specialty}</td>
                         <td className="px-4 py-2.5"><div className="flex items-center gap-1 text-xs text-gray-600"><MapPin className="w-3 h-3 text-gray-400" />{p.city}, {p.state}</div></td>
@@ -656,7 +669,7 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
                     ))}
                   </tbody>
                 </table>
-                <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">Facility/System is inferred by matching each provider's practice address against registered organizations in NPPES — best-effort, not authoritative.</div>
+                <div className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">Facility/System resolves in order: CMS Physician Compare affiliation (by NPI) → practice-address match against NPPES organizations → shared-address grouping among providers in this list → labeled independent/solo if no tie is found. Not authoritative for the address and grouping tiers.</div>
               </div>
             </div>
           )}

@@ -192,7 +192,7 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
           if (physicians.length > 0) {
             setPhysicians(physicians);
             setAffPhysCount(physicians.length);
-            const physNpis = [...new Set(physicians.map(p => p.NPI))].slice(0, 20);
+            const physNpis = [...new Set(physicians.map(p => p.npi))].slice(0, 20);
             const affRows = await getSystemCptProfile(physNpis, { limit: 200 });
             setCptData(affRows); setMatchedBy(affRows.length > 0 ? 'affiliated' : 'none');
           } else {
@@ -208,7 +208,7 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
           if (physResults.length > 0) {
             setPhysicians(physResults);
             setAffPhysCount(physResults.length);
-            const physNpis = [...new Set(physResults.map(p => p.NPI))].slice(0, 20);
+            const physNpis = [...new Set(physResults.map(p => p.npi))].slice(0, 20);
             const affRows = await getSystemCptProfile(physNpis, { limit: 200 });
             setCptData(affRows); setMatchedBy(affRows.length > 0 ? 'affiliated' : 'none');
           } else {
@@ -469,7 +469,7 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
           <div className="space-y-3">
             <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700">
               <Users className="w-4 h-4 flex-shrink-0" />
-              Physicians affiliated with <strong>{name}</strong> — sourced from CMS Physician Compare (org_nm field). Click any provider to view their full profile including Medicare procedure data and Open Payments.
+              Physicians affiliated with <strong>{name}</strong> — sourced from CMS Physician Compare (facility_name field). Click any provider to view their full profile including Medicare procedure data and Open Payments.
             </div>
             {physLoading && <div className="flex items-center justify-center gap-2 text-sm text-gray-500 py-8"><Loader2 className="w-4 h-4 animate-spin text-blue-500" />Searching Physician Compare…</div>}
             {!physLoading && physicians !== null && physicians.length === 0 && (
@@ -493,14 +493,14 @@ function FacilityDetail({ target, onBack, setActiveView, setSelectedNpi }: {
                   </thead>
                   <tbody className="divide-y divide-gray-50 bg-white">
                     {physicians.slice(0, 100).map(p => (
-                      <tr key={p.NPI} className="hover:bg-blue-50/40 cursor-pointer group" onClick={() => { setSelectedNpi(p.NPI); setActiveView('profile'); }}>
+                      <tr key={p.npi} className="hover:bg-blue-50/40 cursor-pointer group" onClick={() => { setSelectedNpi(p.npi); setActiveView('profile'); }}>
                         <td className="px-4 py-2.5">
-                          <div className="font-medium text-gray-900 group-hover:text-blue-700">{p.frst_nm} {p.lst_nm}{p.Cred ? `, ${p.Cred}` : ''}</div>
-                          <div className="text-xs text-gray-400 font-mono">NPI {p.NPI}</div>
+                          <div className="font-medium text-gray-900 group-hover:text-blue-700">{p.provider_first_name} {p.provider_last_name}{p.cred ? `, ${p.cred}` : ''}</div>
+                          <div className="text-xs text-gray-400 font-mono">NPI {p.npi}</div>
                         </td>
                         <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[140px] truncate">{p.pri_spec}</td>
-                        <td className="px-4 py-2.5 text-xs text-gray-500 max-w-[140px] truncate">{p.org_nm}</td>
-                        <td className="px-4 py-2.5 text-xs text-gray-500">{p.cty}, {p.st}</td>
+                        <td className="px-4 py-2.5 text-xs text-gray-500 max-w-[140px] truncate">{p.facility_name}</td>
+                        <td className="px-4 py-2.5 text-xs text-gray-500">{p.citytown}, {p.state}</td>
                         <td className="px-4 py-2.5"><ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-blue-500" /></td>
                       </tr>
                     ))}

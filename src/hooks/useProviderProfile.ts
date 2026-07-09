@@ -48,9 +48,11 @@ function isFetchError(e: unknown): boolean {
   return msg.includes('fetch') || msg.includes('network') || msg.includes('cors') || msg.includes('failed');
 }
 
-function buildHospitalList(c: PhysicianCompareRecord | null): string[] {
-  if (!c) return [];
-  return [c.hosp_afl_lbn_1, c.hosp_afl_lbn_2, c.hosp_afl_lbn_3, c.hosp_afl_lbn_4, c.hosp_afl_lbn_5].filter(Boolean);
+// CMS's current "Physicians & Clinicians" dataset (mj5m-pzi6) no longer exposes
+// hospital-affiliation fields (it used to, as hosp_afl_lbn_1..5) — there is
+// currently no CMS-published hospital affiliation signal for this endpoint.
+function buildHospitalList(_c: PhysicianCompareRecord | null): string[] {
+  return [];
 }
 
 function mockProfile(npi: string): ProfileData | null {
@@ -133,7 +135,7 @@ export function useProviderProfile(npi: string | null) {
         // Phase 1b: if Physician Compare returned nothing or has no org data,
         // try a name+state lookup as fallback (common for PAs, NPs, newer providers)
         let finalCompare = compareResult;
-        if (!finalCompare || (!finalCompare.org_nm && !finalCompare.hosp_afl_lbn_1)) {
+        if (!finalCompare || !finalCompare.facility_name) {
           const lastName = nppesResult.basic.last_name ?? '';
           const firstName = nppesResult.basic.first_name ?? '';
           if (lastName && addr?.state) {
@@ -158,9 +160,9 @@ export function useProviderProfile(npi: string | null) {
           zip: addr?.postal_code?.slice(0, 5) ?? '',
           phone: addr?.telephone_number ?? '',
           lastUpdated: nppesResult.basic.last_updated ?? '',
-          medSchool: finalCompare?.Med_sch ?? null,
-          gradYear: finalCompare?.Grd_yr ?? null,
-          organization: finalCompare?.org_nm || finalCompare?.hosp_afl_lbn_1 || null,
+          medSchool: finalCompare?.med_sch ?? null,
+          gradYear: finalCompare?.grd_yr ?? null,
+          organization: finalCompare?.facility_name || null,
           groupPracticeSize: finalCompare?.num_org_mem ?? null,
           hospitalAffiliations: buildHospitalList(finalCompare),
           payments: [],
