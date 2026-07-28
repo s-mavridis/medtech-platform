@@ -8,6 +8,7 @@ import { Tooltip } from 'react-tooltip';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { useCptExplorer } from '../../hooks/useCptExplorer';
 import type { StateAggregate, InstitutionAggregate } from '../../hooks/useCptExplorer';
+import { getAllCptProviders } from '../../api/cms';
 import type { CptProviderRow } from '../../api/cms';
 import { resolveProviderFacilities } from '../../api/facilityMatch';
 import type { FacilityMatch } from '../../api/facilityMatch';
@@ -458,6 +459,30 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
 
   const [facilityMap, facilityLoading] = useFacilityMatch(summary?.topProviders ?? []);
 
+  const [fullListState, setFullListState] = useState<{ loading: boolean; rowsSoFar: number; error: string | null }>({
+    loading: false, rowsSoFar: 0, error: null,
+  });
+
+  const handleExportFullList = async () => {
+    if (!summary) return;
+    setFullListState({ loading: true, rowsSoFar: 0, error: null });
+    try {
+      const { rows: allRows, capped } = await getAllCptProviders(summary.hcpcs, {
+        year,
+        onProgress: p => setFullListState(s => ({ ...s, rowsSoFar: p.rowsSoFar })),
+      });
+      const fullFacilityMap = await resolveProviderFacilities(allRows);
+      exportCsv(
+        `${summary.hcpcs}-all-providers-${year}${capped ? '-capped-50k' : ''}.csv`,
+        ['#', 'Provider', 'NPI', 'Facility/System', 'Specialty', 'City', 'State', 'Services', 'Patients', 'Avg Allowed', 'Avg Paid'],
+        allRows.map((p, i) => [i + 1, p.displayName, p.npi, fullFacilityMap.get(p.npi)?.name ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
+      );
+      setFullListState({ loading: false, rowsSoFar: allRows.length, error: capped ? 'capped' : null });
+    } catch (e) {
+      setFullListState({ loading: false, rowsSoFar: 0, error: (e as Error).message ?? 'Failed to fetch full list' });
+    }
+  };
+
   const sortedProviders = applySortNum(summary?.topProviders ?? [], provSort, (r, k) => {
     if (k === 'totalServices') return r.totalServices;
     if (k === 'uniquePatients') return r.uniquePatients;
@@ -626,15 +651,32 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
 
           {/* Providers tab */}
           {tab === 'providers' && (
-            <div className="p-4">
-              <div className="card overflow-hidden p-0">
-                <div className="p-3 border-b border-gray-100 flex items-center justify-end">
+            <div className="p-4 space-y-3">
+              <div className="card p-3 flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-xs text-gray-500">
+                  Showing top {fmtN(sortedProviders.length)} by volume (sample of {summary.isTruncated ? '500+' : fmtN(summary.totalProviders)}).
+                  {fullListState.error === 'capped' && <span className="text-amber-600"> Full export capped at 50,000 rows — this code has even more billers nationally.</span>}
+                  {fullListState.error && fullListState.error !== 'capped' && <span className="text-red-600"> {fullListState.error}</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  {fullListState.loading && (
+                    <span className="flex items-center gap-1.5 text-xs text-gray-500">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                      Fetching full national list… {fmtN(fullListState.rowsSoFar)} so far
+                    </span>
+                  )}
+                  <button onClick={handleExportFullList} disabled={fullListState.loading}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0">
+                    <Download className="w-3.5 h-3.5" /> Export Full National List (CSV)
+                  </button>
                   <ExportCsvButton onClick={() => exportCsv(
                     `${summary.hcpcs}-top-providers.csv`,
                     ['#', 'Provider', 'NPI', 'Facility/System', 'Specialty', 'City', 'State', 'Services', 'Patients', 'Avg Allowed', 'Avg Paid'],
                     sortedProviders.map((p, i) => [i + 1, p.displayName, p.npi, facilityMap.get(p.npi)?.name ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
                   )} />
                 </div>
+              </div>
+              <div className="card overflow-hidden p-0">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                     <tr>

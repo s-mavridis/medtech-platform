@@ -149,7 +149,7 @@ export async function getProcedureVolumesByNpi(npi: string): Promise<ProcedureVo
   return [...rows2023, ...rows2022].sort((a, b) => b.totalServices - a.totalServices);
 }
 
-/** Query Medicare PUF by HCPCS/CPT code — returns all providers billing that code */
+/** Query Medicare PUF by HCPCS/CPT code — returns a sample of providers billing that code */
 export async function getCptProviders(
   hcpcsCode: string,
   options: { limit?: number; year?: '2023' | '2022' } = {}
@@ -163,6 +163,55 @@ export async function getCptProviders(
   if (!resp.ok) throw new Error(`CMS PUF API error ${resp.status}`);
   const rows: PhysicianPufRecord[] = await resp.json();
   return rows.map(parseRow).sort((a, b) => b.totalServices - a.totalServices);
+}
+
+export interface FetchAllProgress { rowsSoFar: number; page: number; capped: boolean }
+
+/**
+ * Fetch the COMPLETE national provider list for a HCPCS/CPT code, paginating
+ * through the Medicare PUF with offset/size until exhausted. Some very common
+ * E&M codes (e.g. 99213) are billed by 500,000+ distinct providers nationally —
+ * far too many to hold/render in a browser tab — so this is capped at `maxRows`
+ * (default 50,000, generous for the vast majority of codes) and reports that
+ * truncation back via the return value so the UI can disclose it honestly.
+ */
+export async function getAllCptProviders(
+  hcpcsCode: string,
+  options: { year?: '2023' | '2022'; pageSize?: number; maxRows?: number; onProgress?: (p: FetchAllProgress) => void } = {}
+): Promise<{ rows: CptProviderRow[]; capped: boolean }> {
+  const id = options.year === '2022' ? PUF_2022_ID : PUF_2023_ID;
+  const pageSize = options.pageSize ?? 5000;
+  const maxRows = options.maxRows ?? 50000;
+  const code = hcpcsCode.trim().toUpperCase();
+
+  let offset = 0;
+  let page = 0;
+  let capped = false;
+  const all: PhysicianPufRecord[] = [];
+
+  while (true) {
+    const params = new URLSearchParams({
+      'filter[HCPCS_Cd]': code,
+      size: String(pageSize),
+      offset: String(offset),
+    });
+    const resp = await fetch(`${BASE}/${id}/data?${params}`, { signal: AbortSignal.timeout(30000) });
+    if (!resp.ok) throw new Error(`CMS PUF API error ${resp.status}`);
+    const rows: PhysicianPufRecord[] = await resp.json();
+    all.push(...rows);
+    page++;
+
+    if (all.length >= maxRows) {
+      capped = rows.length === pageSize; // more data existed beyond the cap
+      options.onProgress?.({ rowsSoFar: all.length, page, capped });
+      break;
+    }
+    options.onProgress?.({ rowsSoFar: all.length, page, capped: false });
+    if (rows.length < pageSize) break; // last page
+    offset += pageSize;
+  }
+
+  return { rows: all.slice(0, maxRows).map(parseRow).sort((a, b) => b.totalServices - a.totalServices), capped };
 }
 
 /** Query Medicare PUF by NPI — works for both NPI-1 (individuals) and NPI-2 (org billers) */
