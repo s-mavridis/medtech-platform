@@ -459,27 +459,39 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
 
   const [facilityMap, facilityLoading] = useFacilityMatch(summary?.topProviders ?? []);
 
-  const [fullListState, setFullListState] = useState<{ loading: boolean; rowsSoFar: number; error: string | null }>({
-    loading: false, rowsSoFar: 0, error: null,
-  });
+  const [fullListState, setFullListState] = useState<{
+    loading: boolean; rowsSoFar: number; retrying: boolean; note: string | null;
+  }>({ loading: false, rowsSoFar: 0, retrying: false, note: null });
 
   const handleExportFullList = async () => {
     if (!summary) return;
-    setFullListState({ loading: true, rowsSoFar: 0, error: null });
+    setFullListState({ loading: true, rowsSoFar: 0, retrying: false, note: null });
     try {
-      const { rows: allRows, capped } = await getAllCptProviders(summary.hcpcs, {
+      const { rows: allRows, capped, partial, error } = await getAllCptProviders(summary.hcpcs, {
         year,
-        onProgress: p => setFullListState(s => ({ ...s, rowsSoFar: p.rowsSoFar })),
+        onProgress: p => setFullListState(s => ({ ...s, rowsSoFar: p.rowsSoFar, retrying: !!p.retrying })),
       });
+
+      if (allRows.length === 0) {
+        setFullListState({ loading: false, rowsSoFar: 0, retrying: false, note: error ? `Failed: ${error}` : 'No providers found.' });
+        return;
+      }
+
       const fullFacilityMap = await resolveProviderFacilities(allRows);
       exportCsv(
-        `${summary.hcpcs}-all-providers-${year}${capped ? '-capped-50k' : ''}.csv`,
+        `${summary.hcpcs}-all-providers-${year}${capped ? '-capped-50k' : ''}${partial ? '-partial' : ''}.csv`,
         ['#', 'Provider', 'NPI', 'Facility/System', 'Specialty', 'City', 'State', 'Services', 'Patients', 'Avg Allowed', 'Avg Paid'],
         allRows.map((p, i) => [i + 1, p.displayName, p.npi, fullFacilityMap.get(p.npi)?.name ?? '', p.specialty, p.city, p.state, p.totalServices, p.uniquePatients, p.avgAllowedAmt.toFixed(2), p.avgPaymentAmt.toFixed(2)])
       );
-      setFullListState({ loading: false, rowsSoFar: allRows.length, error: capped ? 'capped' : null });
+
+      const note = partial
+        ? `Exported ${allRows.length.toLocaleString()} rows, but stopped early after a repeated CMS API error (${error}) — the file may be incomplete. Try again in a moment for the rest.`
+        : capped
+        ? 'Full export capped at 50,000 rows — this code has even more billers nationally.'
+        : null;
+      setFullListState({ loading: false, rowsSoFar: allRows.length, retrying: false, note });
     } catch (e) {
-      setFullListState({ loading: false, rowsSoFar: 0, error: (e as Error).message ?? 'Failed to fetch full list' });
+      setFullListState({ loading: false, rowsSoFar: 0, retrying: false, note: (e as Error).message ?? 'Failed to fetch full list' });
     }
   };
 
@@ -655,14 +667,15 @@ export default function CptExplorer({ setActiveView, setSelectedNpi, initialCode
               <div className="card p-3 flex items-center justify-between gap-3 flex-wrap">
                 <div className="text-xs text-gray-500">
                   Showing top {fmtN(sortedProviders.length)} by volume (sample of {summary.isTruncated ? '500+' : fmtN(summary.totalProviders)}).
-                  {fullListState.error === 'capped' && <span className="text-amber-600"> Full export capped at 50,000 rows — this code has even more billers nationally.</span>}
-                  {fullListState.error && fullListState.error !== 'capped' && <span className="text-red-600"> {fullListState.error}</span>}
+                  {fullListState.note && <span className={fullListState.note.startsWith('Exported') || fullListState.note.startsWith('Full export capped') ? 'text-amber-600' : 'text-red-600'}> {fullListState.note}</span>}
                 </div>
                 <div className="flex items-center gap-2">
                   {fullListState.loading && (
                     <span className="flex items-center gap-1.5 text-xs text-gray-500">
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                      Fetching full national list… {fmtN(fullListState.rowsSoFar)} so far
+                      {fullListState.retrying
+                        ? `Retrying after a CMS API hiccup… ${fmtN(fullListState.rowsSoFar)} so far`
+                        : `Fetching full national list… ${fmtN(fullListState.rowsSoFar)} so far`}
                     </span>
                   )}
                   <button onClick={handleExportFullList} disabled={fullListState.loading}

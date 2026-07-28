@@ -165,7 +165,45 @@ export async function getCptProviders(
   return rows.map(parseRow).sort((a, b) => b.totalServices - a.totalServices);
 }
 
-export interface FetchAllProgress { rowsSoFar: number; page: number; capped: boolean }
+export interface FetchAllProgress { rowsSoFar: number; page: number; capped: boolean; retrying?: boolean }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Fetch a single page, retrying with exponential backoff on transient errors (e.g. CMS's own 504s). */
+async function fetchPageWithRetry(
+  url: string,
+  onRetry?: (attempt: number) => void,
+  maxAttempts = 4
+): Promise<PhysicianPufRecord[]> {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) {
+        // 502/503/504 are transient upstream/gateway errors on CMS's side — worth retrying.
+        // Other 4xx/5xx (bad filter, etc.) won't be fixed by retrying.
+        if ([502, 503, 504].includes(resp.status) && attempt < maxAttempts) {
+          lastError = new Error(`CMS PUF API error ${resp.status}`);
+          onRetry?.(attempt);
+          await sleep(1000 * 2 ** (attempt - 1)); // 1s, 2s, 4s
+          continue;
+        }
+        throw new Error(`CMS PUF API error ${resp.status}`);
+      }
+      return await resp.json();
+    } catch (e) {
+      lastError = e as Error;
+      if (attempt < maxAttempts) {
+        onRetry?.(attempt);
+        await sleep(1000 * 2 ** (attempt - 1));
+        continue;
+      }
+    }
+  }
+  throw lastError ?? new Error('CMS PUF API request failed');
+}
 
 /**
  * Fetch the COMPLETE national provider list for a HCPCS/CPT code, paginating
@@ -174,19 +212,27 @@ export interface FetchAllProgress { rowsSoFar: number; page: number; capped: boo
  * far too many to hold/render in a browser tab — so this is capped at `maxRows`
  * (default 50,000, generous for the vast majority of codes) and reports that
  * truncation back via the return value so the UI can disclose it honestly.
+ *
+ * CMS's own API intermittently returns 502/503/504 on individual pages under
+ * this kind of sustained paginated load, so each page retries with backoff.
+ * If a page still fails after retries, pagination stops and whatever was
+ * gathered so far is returned as a partial result rather than throwing away
+ * everything fetched up to that point.
  */
 export async function getAllCptProviders(
   hcpcsCode: string,
   options: { year?: '2023' | '2022'; pageSize?: number; maxRows?: number; onProgress?: (p: FetchAllProgress) => void } = {}
-): Promise<{ rows: CptProviderRow[]; capped: boolean }> {
+): Promise<{ rows: CptProviderRow[]; capped: boolean; partial: boolean; error?: string }> {
   const id = options.year === '2022' ? PUF_2022_ID : PUF_2023_ID;
-  const pageSize = options.pageSize ?? 5000;
+  const pageSize = options.pageSize ?? 2000;
   const maxRows = options.maxRows ?? 50000;
   const code = hcpcsCode.trim().toUpperCase();
 
   let offset = 0;
   let page = 0;
   let capped = false;
+  let partial = false;
+  let error: string | undefined;
   const all: PhysicianPufRecord[] = [];
 
   while (true) {
@@ -195,9 +241,20 @@ export async function getAllCptProviders(
       size: String(pageSize),
       offset: String(offset),
     });
-    const resp = await fetch(`${BASE}/${id}/data?${params}`, { signal: AbortSignal.timeout(30000) });
-    if (!resp.ok) throw new Error(`CMS PUF API error ${resp.status}`);
-    const rows: PhysicianPufRecord[] = await resp.json();
+    const url = `${BASE}/${id}/data?${params}`;
+
+    let rows: PhysicianPufRecord[];
+    try {
+      rows = await fetchPageWithRetry(url, () => {
+        options.onProgress?.({ rowsSoFar: all.length, page, capped: false, retrying: true });
+      });
+    } catch (e) {
+      // Give up on further pages, but keep everything gathered so far.
+      partial = true;
+      error = (e as Error).message ?? 'CMS PUF API request failed';
+      break;
+    }
+
     all.push(...rows);
     page++;
 
@@ -211,7 +268,12 @@ export async function getAllCptProviders(
     offset += pageSize;
   }
 
-  return { rows: all.slice(0, maxRows).map(parseRow).sort((a, b) => b.totalServices - a.totalServices), capped };
+  return {
+    rows: all.slice(0, maxRows).map(parseRow).sort((a, b) => b.totalServices - a.totalServices),
+    capped,
+    partial,
+    error,
+  };
 }
 
 /** Query Medicare PUF by NPI — works for both NPI-1 (individuals) and NPI-2 (org billers) */
